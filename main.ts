@@ -20,6 +20,7 @@ import {
   TableRow,
   TableCell,
   WidthType,
+  TableLayoutType,
   ShadingType,
   ExternalHyperlink,
   InternalHyperlink,
@@ -1118,7 +1119,8 @@ export default class DocxExporterPlugin extends Plugin {
     return runs;
   }
 
-  // docx 默认页面（A4 + 1 英寸左右页边距）下正文可用宽度，单位 px
+  // docx 默认页面（A4 11906 twips + 左右各 1 英寸页边距 1440）下正文可用宽度
+  private readonly pageContentTwips = 9026;
   private readonly pageContentWidthPx = 602;
   // 单元格左右内边距：各 100 twips
   private readonly cellMarginPx = 2 * (100 / 20) * (96 / 72);
@@ -1138,7 +1140,28 @@ export default class DocxExporterPlugin extends Plugin {
     return max;
   }
 
+  // 各列宽度占比：优先用渲染后的真实宽度（取第一行），量不到时按列数均分
+  private computeColumnFractions(tableEl: HTMLElement, columns: number): number[] {
+    const count = Math.max(1, columns);
+    const widths: number[] = new Array(count).fill(0);
+    let measured = false;
+    for (const row of Array.from(tableEl.querySelectorAll('tr'))) {
+      const cells = Array.from(row.children).filter(c => ['TD', 'TH'].includes((c as HTMLElement).tagName));
+      cells.forEach((cell, index) => {
+        if (index >= count) return;
+        const width = (cell as HTMLElement).getBoundingClientRect().width;
+        if (width > 0) { measured = true; widths[index] = Math.max(widths[index], width); }
+      });
+      if (measured) break;
+    }
+    if (!measured) return new Array(count).fill(1 / count);
+    const total = widths.reduce((sum, w) => sum + w, 0);
+    if (total <= 0) return new Array(count).fill(1 / count);
+    return widths.map(w => w / total);
+  }
+
   // 图片位于表格单元格时，返回该单元格可容纳的宽度（px），否则返回 null
+  // 与 parseTableElement 里设置的列宽使用同一套列宽占比，保证图片不会把单元格撑开
   private getTableCellAvailableWidth(imgEl: HTMLElement): number | null {
     let cell: HTMLElement | null = null;
     try { cell = imgEl.closest('td, th') as HTMLElement | null; } catch (error) { return null; }
@@ -1146,18 +1169,18 @@ export default class DocxExporterPlugin extends Plugin {
     const table = cell.closest('table') as HTMLElement | null;
     if (!table) return null;
 
-    const colSpan = Number(cell.getAttribute('colspan') || '1') || 1;
     const columns = this.countTableColumns(table);
-
-    // 临时容器参与布局，优先用真实占比；量不到时按列数均分
-    let fraction = colSpan / Math.max(1, columns);
-    const tableWidth = table.getBoundingClientRect().width;
-    const cellWidth = cell.getBoundingClientRect().width;
-    if (tableWidth > 0 && cellWidth > 0) {
-      fraction = Math.min(1, Math.max(0.05, cellWidth / tableWidth));
+    const fractions = this.computeColumnFractions(table, columns);
+    const row = cell.parentElement as HTMLElement | null;
+    let index = 0;
+    if (row) {
+      const siblings = Array.from(row.children).filter(c => ['TD', 'TH'].includes((c as HTMLElement).tagName));
+      const found = siblings.indexOf(cell);
+      if (found >= 0) index = found;
     }
-
-    const available = this.pageContentWidthPx * fraction - this.cellMarginPx;
+    const fraction = fractions[index] ?? (1 / Math.max(1, columns));
+    // 扣掉单元格左右边距与边框，再留一点余量
+    const available = this.pageContentWidthPx * fraction - this.cellMarginPx - 6;
     return Math.max(40, Math.round(available));
   }
 
@@ -1217,14 +1240,23 @@ export default class DocxExporterPlugin extends Plugin {
   private async parseTableElement(tableEl: HTMLElement, bodyBgColor: string, sourcePath: string): Promise<Table> {
     const rows: TableRow[] = [];
     let isFirstRow = true;  // 标记是否为表头行
+    const columnCount = this.countTableColumns(tableEl);
+    const columnFractions = this.computeColumnFractions(tableEl, columnCount);
 
     // 遍历表格行
     for (const row of Array.from(tableEl.querySelectorAll('tr'))) {
       const cells: TableCell[] = [];
+      let cellIndex = 0;
 
       // 遍历单元格
       for (const cell of Array.from(row.querySelectorAll('th, td'))) {
         const cellStyle = window.getComputedStyle(cell);
+        // 用 dxa（缇）指定列宽：docx 的百分比宽度会写成非法的 w:w="100%"，Word 只能退回自动调整
+        const columnTwips = Math.max(
+          1,
+          Math.round(this.pageContentTwips * (columnFractions[cellIndex] ?? (1 / Math.max(1, columnCount))))
+        );
+        cellIndex++;
         const isHeader = cell.tagName.toUpperCase() === 'TH' || isFirstRow;
 
         // 处理单元格内容
@@ -1239,6 +1271,7 @@ export default class DocxExporterPlugin extends Plugin {
         // 为表头单元格添加特殊样式
         cells.push(new TableCell({
           children: [paragraph],
+          width: { size: columnTwips, type: WidthType.DXA },
           margins: {
             top: 100,
             bottom: 100,
@@ -1267,7 +1300,8 @@ export default class DocxExporterPlugin extends Plugin {
     // 创建表格，添加边框样式
     return new Table({
       rows,
-      width: { size: 100, type: WidthType.PERCENTAGE },
+      width: { size: this.pageContentTwips, type: WidthType.DXA },
+      layout: TableLayoutType.FIXED,
       margins: { top: 100, bottom: 100 },
       borders: {
         top: { style: BorderStyle.SINGLE, size: 1, color: "auto" },
@@ -1574,6 +1608,9 @@ export default class DocxExporterPlugin extends Plugin {
         finalHeight = Math.round((maxWidth / finalWidth) * finalHeight);
         finalWidth = maxWidth;
       }
+
+      // 便于排查：控制台里能看到每张图片最终用的宽度上限与尺寸
+      console.log(`[DOCX Exporter] image: ${pathForNotice} | maxWidth=${maxImageWidth} | size=${finalWidth}x${finalHeight}`);
 
       return new ImageRun({
         data: buffer,
@@ -1997,11 +2034,48 @@ export default class DocxExporterPlugin extends Plugin {
     zip.file(docPath, xml);
   }
 
+  // 固定布局下 Word 以 w:tblGrid 的列宽为准，而 docx 生成的是写死的 100 缇，
+  // 这里用单元格实际宽度重写列宽，表格才不会超出页面、图片才不会撑破单元格
+  private async fixTableGridInZip(zip: JSZip): Promise<void> {
+    const docPath = 'word/document.xml';
+    const docFile = zip.file(docPath);
+    if (!docFile) return;
+
+    let xml = await docFile.async('string');
+    if (!xml.includes('<w:tblGrid>')) return;
+
+    xml = xml.replace(/<w:tbl>[\s\S]*?<\/w:tbl>/g, (tableXml: string) => {
+      const firstRow = tableXml.match(/<w:tr>[\s\S]*?<\/w:tr>/);
+      const widths = firstRow
+        ? [...firstRow[0].matchAll(/<w:tcW[^>]*w:w="(\d+)"[^>]*\/>/g)]
+          .map(match => Number(match[1]))
+          .filter(value => value > 0)
+        : [];
+
+      if (widths.length === 0) {
+        // 取不到列宽就退回自动布局，避免列被压成 100 缇
+        return tableXml.replace(/<w:tblLayout[^>]*\/>/g, '');
+      }
+
+      const grid = `<w:tblGrid>${widths.map(width => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>`;
+      let patched = tableXml.replace(/<w:tblGrid>[\s\S]*?<\/w:tblGrid>/, grid);
+      if (!patched.includes('<w:tblLayout')) {
+        patched = patched.replace(/<\/w:tblPr>/, '<w:tblLayout w:type="fixed"/></w:tblPr>');
+      }
+      return patched;
+    });
+
+    zip.file(docPath, xml);
+  }
+
   private async fixDocxBlobAuto(blob: Blob): Promise<Blob> {
     const zip = await JSZip.loadAsync(blob);
 
     // 修正书签 id（目录跳转依赖它）
     await this.fixBookmarkIdsInZip(zip);
+
+    // 修正表格列宽（固定布局依赖 tblGrid）
+    await this.fixTableGridInZip(zip);
 
     const mediaEntries = Object.keys(zip.files).filter(name => name.startsWith('word/media/') && !name.endsWith('/'));
     if (mediaEntries.length === 0) {
