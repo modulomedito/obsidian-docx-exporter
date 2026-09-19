@@ -1118,6 +1118,56 @@ export default class DocxExporterPlugin extends Plugin {
     return runs;
   }
 
+  // docx 默认页面（A4 + 1 英寸左右页边距）下正文可用宽度，单位 px
+  private readonly pageContentWidthPx = 602;
+  // 单元格左右内边距：各 100 twips
+  private readonly cellMarginPx = 2 * (100 / 20) * (96 / 72);
+
+  // 表格列数（考虑 colspan，取各行的最大值）
+  private countTableColumns(tableEl: HTMLElement): number {
+    let max = 0;
+    for (const row of Array.from(tableEl.querySelectorAll('tr'))) {
+      let count = 0;
+      for (const cell of Array.from(row.children)) {
+        const tag = (cell as HTMLElement).tagName?.toUpperCase();
+        if (tag !== 'TD' && tag !== 'TH') continue;
+        count += Number(cell.getAttribute('colspan') || '1') || 1;
+      }
+      max = Math.max(max, count);
+    }
+    return max;
+  }
+
+  // 图片位于表格单元格时，返回该单元格可容纳的宽度（px），否则返回 null
+  private getTableCellAvailableWidth(imgEl: HTMLElement): number | null {
+    let cell: HTMLElement | null = null;
+    try { cell = imgEl.closest('td, th') as HTMLElement | null; } catch (error) { return null; }
+    if (!cell) return null;
+    const table = cell.closest('table') as HTMLElement | null;
+    if (!table) return null;
+
+    const colSpan = Number(cell.getAttribute('colspan') || '1') || 1;
+    const columns = this.countTableColumns(table);
+
+    // 临时容器参与布局，优先用真实占比；量不到时按列数均分
+    let fraction = colSpan / Math.max(1, columns);
+    const tableWidth = table.getBoundingClientRect().width;
+    const cellWidth = cell.getBoundingClientRect().width;
+    if (tableWidth > 0 && cellWidth > 0) {
+      fraction = Math.min(1, Math.max(0.05, cellWidth / tableWidth));
+    }
+
+    const available = this.pageContentWidthPx * fraction - this.cellMarginPx;
+    return Math.max(40, Math.round(available));
+  }
+
+  // 按最大宽度等比缩放
+  private clampImageSize(size: { width: number, height: number }, maxWidth: number): { width: number, height: number } {
+    if (!size.width || size.width <= maxWidth) return size;
+    const height = Math.max(1, Math.round((maxWidth / size.width) * size.height));
+    return { width: Math.round(maxWidth), height };
+  }
+
   // 解析列表（支持多级缩进和有序/无序）
   private async parseListElement(
     listEl: HTMLUListElement | HTMLOListElement,
@@ -1460,11 +1510,16 @@ export default class DocxExporterPlugin extends Plugin {
         return null;
       }
 
+      // 表格单元格里的图片必须收敛到单元格宽度内，否则 Word 中会显示不全
+      const maxImageWidth = this.getTableCellAvailableWidth(imgEl) ?? 550;
+
       // SVG 无法被 Word 稳定渲染，先用 rsvg-convert 栅格化为 PNG 再嵌入
       let svgDisplaySize: { width: number, height: number } | null = null;
       if (this.looksLikeSvg(buffer, imageExtension)) {
         const svgText = new TextDecoder().decode(new Uint8Array(buffer));
         svgDisplaySize = this.resolveSvgDisplaySize(imgEl, this.getSvgIntrinsicSize(svgText));
+        // 先按可用宽度收敛，再按收敛后的宽度渲染 PNG，避免生成超大位图
+        svgDisplaySize = this.clampImageSize(svgDisplaySize, maxImageWidth);
         // 只有在 rsvg-convert 可用时才转换（移动端没有 Node 环境，保持原样嵌入）
         if (this.resolveRsvgConverterPath()) {
           const shortPath = pathForNotice.length > 50 ? `${pathForNotice.substring(0, 50)}...` : pathForNotice;
@@ -1479,7 +1534,7 @@ export default class DocxExporterPlugin extends Plugin {
         }
       }
 
-      const maxWidth = 550;
+      const maxWidth = maxImageWidth;
       let finalWidth: number;
       let finalHeight: number;
 
