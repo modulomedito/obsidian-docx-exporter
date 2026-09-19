@@ -509,7 +509,12 @@ export default class DocxExporterPlugin extends Plugin {
   // 标题 -> Word 书签名（用于目录跳转），以及按顺序记录的标题层级信息
   private headingBookmarks = new Map<string, string>();
   private headingBookmarksLoose = new Map<string, string>();
+  // 同名标题可能出现多次：每个标题实例都要有唯一书签名，链接指向第一次出现的位置
+  private headingBookmarksByKey = new Map<string, string[]>();
+  private headingRenderCursor = new Map<string, number>();
   private headingEntries: { level: number, text: string, bookmark: string }[] = [];
+  // 原始 Markdown 中 ```table-of-contents 代码块的选项（按出现顺序）
+  private tocOptionQueue: string[] = [];
 
   async onload() {
     this.i18n = new I18N(this.app);
@@ -618,6 +623,8 @@ export default class DocxExporterPlugin extends Plugin {
   private collectHeadingBookmarks(root: HTMLElement): void {
     this.headingBookmarks.clear();
     this.headingBookmarksLoose.clear();
+    this.headingBookmarksByKey.clear();
+    this.headingRenderCursor.clear();
     this.headingEntries = [];
 
     const headings = Array.from(root.querySelectorAll('h1, h2, h3, h4, h5, h6'));
@@ -629,18 +636,20 @@ export default class DocxExporterPlugin extends Plugin {
       if (!text) continue;
       const key = this.normalizeAnchorText(text);
       if (!key) continue;
-      let bookmark = this.headingBookmarks.get(key);
-      if (!bookmark) {
-        counter++;
-        // Word 书签名只能由字母、数字、下划线组成，且以字母开头
-        bookmark = `toc_heading_${counter}`;
-        this.headingBookmarks.set(key, bookmark);
-        const looseKey = this.looseAnchorKey(text);
-        if (looseKey && !this.headingBookmarksLoose.has(looseKey)) {
-          this.headingBookmarksLoose.set(looseKey, bookmark);
-        }
-      }
+
+      counter++;
+      // Word 书签名只能由字母、数字、下划线组成，且以字母开头
+      const bookmark = `toc_heading_${counter}`;
       this.headingEntries.push({ level, text, bookmark });
+
+      const list = this.headingBookmarksByKey.get(key) ?? [];
+      list.push(bookmark);
+      this.headingBookmarksByKey.set(key, list);
+      if (!this.headingBookmarks.has(key)) this.headingBookmarks.set(key, bookmark);
+      const looseKey = this.looseAnchorKey(text);
+      if (looseKey && !this.headingBookmarksLoose.has(looseKey)) {
+        this.headingBookmarksLoose.set(looseKey, bookmark);
+      }
     }
   }
 
@@ -648,6 +657,17 @@ export default class DocxExporterPlugin extends Plugin {
     const key = this.normalizeAnchorText(text);
     if (!key) return null;
     return this.headingBookmarks.get(key) ?? null;
+  }
+
+  // 渲染标题时按顺序取用书签名，保证同名标题的书签名也不重复
+  private takeHeadingBookmarkForRender(text: string): string | null {
+    const key = this.normalizeAnchorText(text);
+    if (!key) return null;
+    const list = this.headingBookmarksByKey.get(key);
+    if (!list || list.length === 0) return null;
+    const index = this.headingRenderCursor.get(key) ?? 0;
+    this.headingRenderCursor.set(key, index + 1);
+    return list[Math.min(index, list.length - 1)];
   }
 
   // 把 [[#标题]] 这类站内链接解析成书签名
@@ -673,10 +693,51 @@ export default class DocxExporterPlugin extends Plugin {
     return new TextRun({ text, style: "Hyperlink", color: '0563C1', underline: {} });
   }
 
-  // 未被插件处理的 ```table-of-contents / ```toc 代码块
-  private isTocCodeBlock(codeEl: HTMLElement): boolean {
-    const classes = Array.from(codeEl.classList).map(cls => cls.toLowerCase());
-    return classes.includes('language-table-of-contents') || classes.includes('language-toc');
+  // ```table-of-contents / ```toc 代码块（可能是 pre>code，也可能是已渲染的容器）
+  private isTocCodeBlock(el: HTMLElement): boolean {
+    const classesOf = (node: HTMLElement) => Array.from(node.classList).map(cls => cls.toLowerCase());
+    const classes = classesOf(el);
+    const codeEl = el.tagName?.toUpperCase() === 'CODE' ? el : el.querySelector('code');
+    const codeClasses = codeEl ? classesOf(codeEl as HTMLElement) : [];
+    return [...classes, ...codeClasses].some(cls => cls === 'language-table-of-contents' || cls === 'language-toc');
+  }
+
+  // 目录占位元素：可能带 block-language-* 类名，也可能仍是未展开的代码块
+  private isTocPlaceholder(el: HTMLElement): boolean {
+    if (this.isTocCodeBlock(el)) return true;
+    const classes = Array.from(el.classList).map(cls => cls.toLowerCase());
+    if (classes.some(cls => cls === 'block-language-table-of-contents' || cls === 'block-language-toc')) return true;
+    try {
+      if (el.querySelector(':scope > .block-language-table-of-contents, :scope > .block-language-toc')) return true;
+    } catch (error) { }
+    return false;
+  }
+
+  // 从原始 Markdown 中按顺序取出 ```table-of-contents / ```toc 代码块的内容（含选项）
+  private parseTocBlocksFromMarkdown(markdown: string): string[] {
+    const blocks: string[] = [];
+    let inBlock = false;
+    let buffer: string[] = [];
+    for (const rawLine of (markdown ?? '').split('\n')) {
+      const line = rawLine.trim();
+      if (!inBlock) {
+        if (/^`{3,}\s*(table-of-contents|toc)\s*$/i.test(line)) {
+          inBlock = true;
+          buffer = [];
+        }
+      } else if (/^`{3,}\s*$/.test(line)) {
+        inBlock = false;
+        blocks.push(buffer.join('\n'));
+      } else {
+        buffer.push(rawLine);
+      }
+    }
+    return blocks;
+  }
+
+  // 依次取用 Markdown 里解析到的目录选项，取不到就用传入的文本兜底
+  private takeTocOptions(fallback: string): string {
+    return this.tocOptionQueue.length > 0 ? this.tocOptionQueue.shift() as string : fallback;
   }
 
   // 目录代码块所在的容器（Automatic Table Of Contents 插件会生成这类容器）
@@ -1511,6 +1572,13 @@ export default class DocxExporterPlugin extends Plugin {
       const tagName = el.tagName?.toUpperCase();
       if (!tagName) continue;
 
+      // 目录占位块（```table-of-contents / ```toc）：直接用标题生成可跳转目录，
+      // 不依赖 Automatic Table Of Contents 插件渲染出来的 DOM
+      if (this.isTocPlaceholder(el)) {
+        docxObjects.push(...this.buildTableOfContents(this.takeTocOptions(el.textContent ?? '')));
+        continue;
+      }
+
       let currentParagraphOptions: any = { ...paragraphStyles, font: mainFont };
 
       if (tagName.startsWith('H') && i > 0) {
@@ -1532,7 +1600,7 @@ export default class DocxExporterPlugin extends Plugin {
           const headingChildren = await this.parseInlineElements(el, sourcePath);
           if (headingChildren.length > 0) {
             // 给标题加书签，目录里的内部链接才能跳转过来
-            const bookmark = this.getHeadingBookmark(el.textContent ?? '');
+            const bookmark = this.takeHeadingBookmarkForRender(el.textContent ?? '');
             const headingRuns: InlineRun[] = bookmark
               ? [new Bookmark({ id: bookmark, children: headingChildren })]
               : headingChildren;
@@ -1541,6 +1609,11 @@ export default class DocxExporterPlugin extends Plugin {
           break;
         case 'P':
         case 'DIV':
+          // 容器里直接包含列表时按块级结构递归解析，避免列表被压成一整段纯文本
+          if (el.querySelector(':scope > ul, :scope > ol')) {
+            docxObjects.push(...await this.htmlToDocxObjects(el, bodyBgColor, false, indentLevel, sourcePath));
+            break;
+          }
           if (el.textContent?.trim() || el.querySelector('img')) {
             currentParagraphOptions.spacing = { after: 200 };
             const pChildren = await this.parseInlineElements(el, sourcePath);
@@ -1575,7 +1648,7 @@ export default class DocxExporterPlugin extends Plugin {
           const codeElement = el.querySelector('code');
           if (codeElement && this.isTocCodeBlock(codeElement)) {
             // 目录插件未启用时，代码块不会被展开，这里自行生成可跳转的目录
-            docxObjects.push(...this.buildTableOfContents(el.textContent ?? ''));
+            docxObjects.push(...this.buildTableOfContents(this.takeTocOptions(el.textContent ?? '')));
             break;
           }
           if (codeElement) {
@@ -1947,6 +2020,8 @@ export default class DocxExporterPlugin extends Plugin {
 
       // 先扫描全部标题并建立书签映射，保证目录链接（通常出现在标题之前）能正确指向
       this.collectHeadingBookmarks(tempDiv);
+      // 从原始 Markdown 里取出目录代码块的选项
+      this.tocOptionQueue = this.parseTocBlocksFromMarkdown(markdownContent);
 
       // 重置图片计数器并显示开始导出提示
       this.totalNetworkImages = this.countNetworkImages(tempDiv);
