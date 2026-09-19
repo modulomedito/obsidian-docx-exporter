@@ -24,6 +24,7 @@ import {
   ExternalHyperlink,
   InternalHyperlink,
   Bookmark,
+  PageBreak,
   IBordersOptions,
   BorderStyle,
   ImageRun,
@@ -700,6 +701,15 @@ export default class DocxExporterPlugin extends Plugin {
     const codeEl = el.tagName?.toUpperCase() === 'CODE' ? el : el.querySelector('code');
     const codeClasses = codeEl ? classesOf(codeEl as HTMLElement) : [];
     return [...classes, ...codeClasses].some(cls => cls === 'language-table-of-contents' || cls === 'language-toc');
+  }
+
+  // 分页标记：<div class="page-break" style="page-break-before: always;"></div>
+  private isPageBreakElement(el: HTMLElement): boolean {
+    if (el.classList?.contains('page-break')) return true;
+    const styleAttr = (el.getAttribute('style') || '').toLowerCase().replace(/\s+/g, '');
+    return /page-break-before:always/.test(styleAttr)
+      || /break-before:page/.test(styleAttr)
+      || /page-break-after:always/.test(styleAttr);
   }
 
   // 目录占位元素：可能带 block-language-* 类名，也可能仍是未展开的代码块
@@ -1572,6 +1582,12 @@ export default class DocxExporterPlugin extends Plugin {
       const tagName = el.tagName?.toUpperCase();
       if (!tagName) continue;
 
+      // 分页标记：插入 Word 分页符
+      if (this.isPageBreakElement(el)) {
+        docxObjects.push(new Paragraph({ children: [new PageBreak()] }));
+        continue;
+      }
+
       // 目录占位块（```table-of-contents / ```toc）：直接用标题生成可跳转目录，
       // 不依赖 Automatic Table Of Contents 插件渲染出来的 DOM
       if (this.isTocPlaceholder(el)) {
@@ -1611,6 +1627,11 @@ export default class DocxExporterPlugin extends Plugin {
         case 'DIV':
           // 容器里直接包含列表时按块级结构递归解析，避免列表被压成一整段纯文本
           if (el.querySelector(':scope > ul, :scope > ol')) {
+            docxObjects.push(...await this.htmlToDocxObjects(el, bodyBgColor, false, indentLevel, sourcePath));
+            break;
+          }
+          // 分页标记可能被包在其它容器里，递归下去才能识别
+          if (el.querySelector('.page-break')) {
             docxObjects.push(...await this.htmlToDocxObjects(el, bodyBgColor, false, indentLevel, sourcePath));
             break;
           }
