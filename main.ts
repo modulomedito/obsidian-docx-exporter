@@ -1011,8 +1011,67 @@ export default class DocxExporterPlugin extends Plugin {
     return runs;
   }
 
+  // vault 在磁盘上的根路径（仅桌面端可用）
+  private getVaultBasePath(): string {
+    try {
+      const adapter: any = (this.app.vault as any).adapter;
+      return typeof adapter?.getBasePath === 'function' ? adapter.getBasePath() : '';
+    } catch (error) {
+      return '';
+    }
+  }
+
+  // 按库内路径 / 链接名查找文件
+  private findVaultFile(linkPath: string, sourcePath: string): TFile | null {
+    if (!linkPath) return null;
+    const normalized = linkPath.replace(/\\/g, '/').replace(/^\/+/, '');
+    const abstract = this.app.vault.getAbstractFileByPath(normalized);
+    if (abstract instanceof TFile) return abstract;
+    const dest = this.app.metadataCache.getFirstLinkpathDest(normalized, sourcePath);
+    if (dest instanceof TFile) return dest;
+    // 兜底：忽略大小写再匹配一次完整路径
+    const lower = normalized.toLowerCase();
+    const matched = this.app.vault.getFiles().find(file => file.path.toLowerCase() === lower);
+    return matched ?? null;
+  }
+
+  // 从 img 的 src（app://local/...、capacitor://... 或库内相对路径）反查库内文件
+  // 标准 Markdown 语法 ![](path) 不会被包裹成 internal-embed，只能靠 src 解析
+  private resolveImageFileFromSrc(src: string, sourcePath: string): TFile | null {
+    const withoutScheme = src.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*\/?/i, '');
+    const queryPath = src.match(/[?&]path=([^&]+)/i)?.[1];
+    const rawCandidates = [withoutScheme.split(/[?#]/)[0], queryPath].filter(Boolean) as string[];
+
+    const basePath = this.getVaultBasePath().replace(/\\/g, '/').replace(/\/+$/, '');
+    const candidates: string[] = [];
+    for (const rawCandidate of rawCandidates) {
+      let decoded = rawCandidate;
+      try { decoded = decodeURIComponent(rawCandidate); } catch (error) { }
+      decoded = decoded.replace(/\\/g, '/').replace(/^\/+/, '');
+      if (!decoded) continue;
+      if (basePath && decoded.toLowerCase().startsWith(`${basePath.toLowerCase()}/`)) {
+        candidates.push(decoded.substring(basePath.length + 1));
+      }
+      candidates.push(decoded);
+    }
+
+    for (const candidate of candidates) {
+      const file = this.findVaultFile(candidate, sourcePath);
+      if (file) return file;
+    }
+    // 绝对路径无法对应到库内时，退化为按文件名查找
+    for (const candidate of candidates) {
+      const fileName = candidate.split('/').pop();
+      if (fileName) {
+        const file = this.findVaultFile(fileName, sourcePath);
+        if (file) return file;
+      }
+    }
+    return null;
+  }
+
   private async createImageRun(imgEl: HTMLImageElement, sourcePath: string): Promise<ImageRun | null> {
-    const src = imgEl.getAttribute('src');
+    const src = imgEl.getAttribute('src') ?? '';
     const altText = imgEl.getAttribute('alt');
     let buffer: ArrayBuffer | null = null;
     let imageExtension: string | null = null;
@@ -1034,24 +1093,33 @@ export default class DocxExporterPlugin extends Plugin {
         imageExtension = src.split('.').pop()?.toLowerCase() || 'jpeg';
       } else if (isLocalPath) {
         const parentSpan = imgEl.parentElement as HTMLElement;
-        const pathFromEmbed = parentSpan.getAttribute('alt') || parentSpan.getAttribute('data-href') || parentSpan.getAttribute('data-src');
-        if (!pathFromEmbed) {
-          new Notice(this.i18n.t("IMAGE_LINK_MISSING"));
-          return null;
-        }
-        pathForNotice = pathFromEmbed;
-        const file = this.app.metadataCache.getFirstLinkpathDest(pathFromEmbed, sourcePath);
+        const pathFromEmbed = parentSpan?.getAttribute('alt') || parentSpan?.getAttribute('data-href') || parentSpan?.getAttribute('data-src');
+        let imageFile: TFile | null = null;
 
-        if (!file || !(file instanceof TFile)) {
-          new Notice(this.i18n.t("LOCAL_IMAGE_NOT_FOUND", pathFromEmbed));
-          return null;
+        if (pathFromEmbed) {
+          pathForNotice = pathFromEmbed;
+          imageFile = this.findVaultFile(pathFromEmbed, sourcePath);
+          if (!imageFile) {
+            new Notice(this.i18n.t("LOCAL_IMAGE_NOT_FOUND", pathFromEmbed));
+            return null;
+          }
+        } else {
+          // 标准 Markdown 图片语法（如 ![](img.svg)、表格里的 ![](img.png)）没有 internal-embed 包裹，
+          // 只能从 src 反查库内文件
+          imageFile = this.resolveImageFileFromSrc(src, sourcePath);
+          if (!imageFile) {
+            console.error('[DOCX Exporter] Cannot resolve local image from src:', src);
+            new Notice(this.i18n.t("IMAGE_LINK_MISSING"));
+            return null;
+          }
+          pathForNotice = imageFile.path;
         }
 
         try {
-          buffer = await this.app.vault.readBinary(file);
-          imageExtension = file.extension;
+          buffer = await this.app.vault.readBinary(imageFile);
+          imageExtension = imageFile.extension;
         } catch (readError) {
-          new Notice(this.i18n.t("FILE_READ_FAILED", file.path));
+          new Notice(this.i18n.t("FILE_READ_FAILED", imageFile.path));
           return null;
         }
 
@@ -1062,8 +1130,20 @@ export default class DocxExporterPlugin extends Plugin {
         const mimeType = src.match(/data:image\/(.*?);/)?.[1];
         imageExtension = mimeType || 'png';
       } else {
-        new Notice(this.i18n.t("UNSUPPORTED_IMAGE_FORMAT", src));
-        return null;
+        // 未带协议前缀的相对路径（部分渲染场景），先尝试按库内文件解析
+        const localFile = this.resolveImageFileFromSrc(src, sourcePath);
+        if (!localFile) {
+          new Notice(this.i18n.t("UNSUPPORTED_IMAGE_FORMAT", src));
+          return null;
+        }
+        pathForNotice = localFile.path;
+        try {
+          buffer = await this.app.vault.readBinary(localFile);
+          imageExtension = localFile.extension;
+        } catch (readError) {
+          new Notice(this.i18n.t("FILE_READ_FAILED", localFile.path));
+          return null;
+        }
       }
 
       if (!buffer || !imageExtension) {
