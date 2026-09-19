@@ -1680,10 +1680,7 @@ export default class DocxExporterPlugin extends Plugin {
 
       const docxObjects = await this.htmlToDocxObjects(tempDiv, bodyBgColor, true, 0, sourcePath);
 
-      // 修复：定义 titleParagraph
-      const title = activeFile.basename;
-      const titleParagraph = new Paragraph({ text: title, heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER, spacing: { after: 400 }, font: { name: 'Times New Roman' } });
-
+      // 标题完全沿用 Markdown 的层级：# -> 一级标题，## -> 二级标题……不再插入文件名标题
       // 生成所有需要的 numbering 配置
       const numberingConfig = Array.from(this.numberingReferences).map(ref => ({
         reference: ref,
@@ -1711,7 +1708,7 @@ export default class DocxExporterPlugin extends Plugin {
         },
         sections: [{
           properties: {},
-          children: [titleParagraph, ...docxObjects]
+          children: docxObjects
         }]
       });
 
