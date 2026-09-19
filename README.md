@@ -16,6 +16,7 @@ The biggest advantage of this plugin is its **zero external dependencies**. It d
 * **Image Support**: Can export local and web images from notes, and automatically handles image formats and dimensions.
 * **SVG Support**: On desktop, SVG images (local, remote, or vector graphics referenced by relative path) are rasterized to PNG with the bundled `rsvg-convert` before embedding, rendered at 2x the display size for sharp output. On mobile, where the tool is unavailable, the original SVG is embedded as before.
 * **Compatibility**: The generated DOCX files have good compatibility with Microsoft Word.
+* **Table of Contents**: ```table-of-contents blocks (e.g. from the *Automatic Table Of Contents* plugin) are exported as clickable entries that jump to the corresponding heading, using real Word bookmarks. Headings are bookmarked automatically, so internal `#heading` links work too.
 
 ## Known Issues and Workarounds
 Currently, we have found that when the exported DOCX file is opened with **Apple Pages** or the **system's native Preview app**, the formatting may be incorrect.

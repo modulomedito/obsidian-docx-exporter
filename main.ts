@@ -22,6 +22,8 @@ import {
   WidthType,
   ShadingType,
   ExternalHyperlink,
+  InternalHyperlink,
+  Bookmark,
   IBordersOptions,
   BorderStyle,
   ImageRun,
@@ -29,6 +31,9 @@ import {
   ITableCellOptions
 } from 'docx';
 import * as JSZip from 'jszip';
+
+// 行内内容：文本、图片、外部链接、指向文档内书签的内部链接，以及书签本身
+type InlineRun = TextRun | ExternalHyperlink | InternalHyperlink | ImageRun | Bookmark;
 
 // --- 多语言支持 ---
 const locales = {
@@ -501,6 +506,11 @@ export default class DocxExporterPlugin extends Plugin {
   private rsvgConverterPath: string | null | undefined = undefined;
   private svgPngCache = new Map<string, ArrayBuffer>();
 
+  // 标题 -> Word 书签名（用于目录跳转），以及按顺序记录的标题层级信息
+  private headingBookmarks = new Map<string, string>();
+  private headingBookmarksLoose = new Map<string, string>();
+  private headingEntries: { level: number, text: string, bookmark: string }[] = [];
+
   async onload() {
     this.i18n = new I18N(this.app);
     this.addRibbonIcon('file-output', this.i18n.t("EXPORT_COMMAND_NAME"), () => this.exportCurrentNoteToDocx());
@@ -585,6 +595,223 @@ export default class DocxExporterPlugin extends Plugin {
     if (mime === 'image/svg+xml') return 'svg';
     if (mime === 'image/webp') return 'webp';
     return null;
+  }
+
+  // --- 目录（table-of-contents）与标题书签 ---
+
+  // 标题文本与目录链接目标都用它规范化，保证两边能对上
+  private normalizeAnchorText(text: string): string {
+    let value = (text ?? '').replace(/\s+/g, ' ').trim();
+    // 去掉 Markdown 强调/代码标记（metadataCache 里的标题可能仍带有这些符号）
+    value = value.replace(/[*_`~=]/g, '');
+    // 目录插件会把 # 与 | 替换成空格，这里保持一致
+    value = value.replace(/[#|]/g, ' ');
+    return value.replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  // 宽松匹配：只保留字母、数字和 CJK，忽略标点与空格差异
+  private looseAnchorKey(text: string): string {
+    return this.normalizeAnchorText(text).replace(/[^0-9a-z一-鿿]+/g, '');
+  }
+
+  // 导出前先扫描所有标题，为它们分配书签（目录通常出现在标题之前，必须提前知道锚点）
+  private collectHeadingBookmarks(root: HTMLElement): void {
+    this.headingBookmarks.clear();
+    this.headingBookmarksLoose.clear();
+    this.headingEntries = [];
+
+    const headings = Array.from(root.querySelectorAll('h1, h2, h3, h4, h5, h6'));
+    let counter = 0;
+    for (const heading of headings) {
+      const element = heading as HTMLElement;
+      const text = (element.textContent ?? '').trim();
+      const level = Number(element.tagName.substring(1)) || 1;
+      if (!text) continue;
+      const key = this.normalizeAnchorText(text);
+      if (!key) continue;
+      let bookmark = this.headingBookmarks.get(key);
+      if (!bookmark) {
+        counter++;
+        // Word 书签名只能由字母、数字、下划线组成，且以字母开头
+        bookmark = `toc_heading_${counter}`;
+        this.headingBookmarks.set(key, bookmark);
+        const looseKey = this.looseAnchorKey(text);
+        if (looseKey && !this.headingBookmarksLoose.has(looseKey)) {
+          this.headingBookmarksLoose.set(looseKey, bookmark);
+        }
+      }
+      this.headingEntries.push({ level, text, bookmark });
+    }
+  }
+
+  private getHeadingBookmark(text: string): string | null {
+    const key = this.normalizeAnchorText(text);
+    if (!key) return null;
+    return this.headingBookmarks.get(key) ?? null;
+  }
+
+  // 把 [[#标题]] 这类站内链接解析成书签名
+  private resolveHeadingAnchor(rawTarget: string): string | null {
+    if (!rawTarget) return null;
+    let target = rawTarget.trim();
+    if (!target.startsWith('#')) return null;
+    target = target.substring(1);
+    try { target = decodeURIComponent(target); } catch (error) { }
+
+    // data-href / href 可能形如 "#标题" 或 "#标题|显示文本"
+    const candidates = [target, target.split('|')[0], target.replace(/\|/g, ' ')];
+    for (const candidate of candidates) {
+      const bookmark = this.getHeadingBookmark(candidate);
+      if (bookmark) return bookmark;
+    }
+    const looseKey = this.looseAnchorKey(target);
+    return looseKey ? this.headingBookmarksLoose.get(looseKey) ?? null : null;
+  }
+
+  // 目录条目文本样式
+  private tocLinkTextRun(text: string): TextRun {
+    return new TextRun({ text, style: "Hyperlink", color: '0563C1', underline: {} });
+  }
+
+  // 未被插件处理的 ```table-of-contents / ```toc 代码块
+  private isTocCodeBlock(codeEl: HTMLElement): boolean {
+    const classes = Array.from(codeEl.classList).map(cls => cls.toLowerCase());
+    return classes.includes('language-table-of-contents') || classes.includes('language-toc');
+  }
+
+  // 目录代码块所在的容器（Automatic Table Of Contents 插件会生成这类容器）
+  private isInsideTocBlock(el: HTMLElement): boolean {
+    try {
+      return !!el.closest('.block-language-table-of-contents, .block-language-toc');
+    } catch (error) {
+      return false;
+    }
+  }
+
+  // 判断列表是否为目录：容器带 TOC 类名，或条目全部是指向本文档标题的链接
+  private isTocList(listEl: HTMLElement): boolean {
+    if (this.isInsideTocBlock(listEl)) return true;
+    const items = Array.from(listEl.querySelectorAll(':scope > li'));
+    if (items.length < 2) return false;
+    let anchorCount = 0;
+    for (const item of items) {
+      const link = item.querySelector('a[href^="#"], a[data-href^="#"]');
+      if (link && this.resolveHeadingAnchor(link.getAttribute('data-href') || link.getAttribute('href') || '')) {
+        anchorCount++;
+      }
+    }
+    return anchorCount >= 2 && anchorCount === items.length;
+  }
+
+  // 目录列表渲染为带缩进的段落（不带项目符号，更接近 Word 目录的观感）
+  private async parseTocListElement(
+    listEl: HTMLUListElement | HTMLOListElement,
+    level: number,
+    sourcePath: string
+  ): Promise<Paragraph[]> {
+    const paragraphs: Paragraph[] = [];
+    for (const li of Array.from(listEl.children).filter(c => c.tagName === 'LI')) {
+      const liElement = li as HTMLLIElement;
+      const contentContainer = document.createElement('div');
+      let nestedList: HTMLUListElement | HTMLOListElement | null = null;
+      for (const child of Array.from(liElement.childNodes)) {
+        if (child.nodeType === Node.ELEMENT_NODE && (child.nodeName === 'UL' || child.nodeName === 'OL')) {
+          nestedList = child as HTMLUListElement | HTMLOListElement;
+        } else {
+          contentContainer.appendChild(child.cloneNode(true));
+        }
+      }
+      const children = await this.parseInlineElements(contentContainer, sourcePath);
+      if (children.length > 0) {
+        paragraphs.push(new Paragraph({
+          children,
+          indent: { left: 360 * level },
+          spacing: { after: 60 },
+          font: { name: 'Times New Roman' }
+        }));
+      }
+      if (nestedList) {
+        paragraphs.push(...await this.parseTocListElement(nestedList, level + 1, sourcePath));
+      }
+    }
+    return paragraphs;
+  }
+
+  // 解析 table-of-contents 代码块里的选项（style / minLevel / maxLevel / title 等）
+  private parseTocOptions(source: string): { title: string, style: string, minLevel: number, maxLevel: number } {
+    const options = { title: '', style: 'nestedList', minLevel: 0, maxLevel: 0 };
+    for (const rawLine of (source ?? '').split('\n')) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const match = line.match(/^([a-zA-Z]+)\s*:\s*(.*)$/);
+      if (!match) continue;
+      const name = match[1].toLowerCase();
+      // 去掉行尾注释
+      let value = match[2].split('#')[0].trim();
+      if (name === 'title') {
+        options.title = (value === 'null' || value === '""' || value === "''") ? '' : value;
+      } else if (name === 'style') {
+        options.style = value || 'nestedList';
+      } else if (name === 'minlevel' || name === 'maxlevel') {
+        const parsed = Number.parseInt(value, 10);
+        if (!isNaN(parsed) && parsed >= 0) {
+          if (name === 'minlevel') options.minLevel = parsed; else options.maxLevel = parsed;
+        }
+      }
+    }
+    return options;
+  }
+
+  // 目录插件未启用时，由本插件根据标题生成目录（条目同样是可点击的内部链接）
+  private buildTableOfContents(source: string): Paragraph[] {
+    if (this.headingEntries.length === 0) return [];
+    const options = this.parseTocOptions(source);
+    const entries = this.headingEntries.filter(entry =>
+      (!options.minLevel || entry.level >= options.minLevel) &&
+      (!options.maxLevel || entry.level <= options.maxLevel)
+    );
+    if (entries.length === 0) return [];
+
+    const baseLevel = options.minLevel > 0
+      ? options.minLevel
+      : Math.min(...entries.map(entry => entry.level));
+    const mainFont = { name: 'Times New Roman' };
+    const paragraphs: Paragraph[] = [];
+
+    if (options.title) {
+      paragraphs.push(new Paragraph({
+        children: [new TextRun({ text: options.title, bold: true, font: mainFont })],
+        spacing: { after: 100 },
+        font: mainFont
+      }));
+    }
+
+    if (options.style === 'inlineFirstLevel') {
+      const children: InlineRun[] = [];
+      entries.filter(entry => entry.level === baseLevel).forEach((entry, index) => {
+        if (index > 0) children.push(new TextRun({ text: ' | ', font: mainFont }));
+        children.push(new InternalHyperlink({
+          anchor: entry.bookmark,
+          children: [this.tocLinkTextRun(entry.text)]
+        }));
+      });
+      paragraphs.push(new Paragraph({ children, spacing: { after: 200 }, font: mainFont }));
+      return paragraphs;
+    }
+
+    for (const entry of entries) {
+      const indentLevel = Math.max(0, entry.level - baseLevel);
+      paragraphs.push(new Paragraph({
+        children: [new InternalHyperlink({
+          anchor: entry.bookmark,
+          children: [this.tocLinkTextRun(entry.text)]
+        })],
+        indent: { left: 360 * indentLevel },
+        spacing: { after: 60 },
+        font: mainFont
+      }));
+    }
+    return paragraphs;
   }
 
   // --- SVG 转 PNG（调用随插件附带的 rsvg-convert）---
@@ -943,8 +1170,8 @@ export default class DocxExporterPlugin extends Plugin {
   }
 
   // 解析行内元素（支持超链接、加粗、斜体、代码、图片等）
-  private async parseInlineElements(element: HTMLElement, sourcePath: string): Promise<(TextRun | ExternalHyperlink | ImageRun)[]> {
-    const runs: (TextRun | ExternalHyperlink | ImageRun)[] = [];
+  private async parseInlineElements(element: HTMLElement, sourcePath: string): Promise<InlineRun[]> {
+    const runs: InlineRun[] = [];
     const mainFont = { name: 'Times New Roman' };
     const codeFont = { name: 'Courier New' };
     for (const child of Array.from(element.childNodes)) {
@@ -978,7 +1205,18 @@ export default class DocxExporterPlugin extends Plugin {
         const runOptions: any = { text: el.textContent?.trim() || '', color: this.rgbToHex(style.color), size: this.pxToHalfPoints(style.fontSize), font: mainFont };
         switch (el.tagName.toUpperCase()) {
           case 'A':
-            runs.push(new ExternalHyperlink({ link: el.getAttribute('href') || '', children: [new TextRun({ text: el.textContent?.trim() || '', style: "Hyperlink", color: this.rgbToHex(style.color) || '0563C1', underline: {} })] }));
+            const linkText = el.textContent?.trim() || '';
+            const linkChildren: InlineRun[] = [new TextRun({ text: linkText, style: "Hyperlink", color: this.rgbToHex(style.color) || '0563C1', underline: {} })];
+            const anchor = this.resolveHeadingAnchor(el.getAttribute('data-href') || el.getAttribute('href') || '');
+            if (anchor) {
+              // 指向本文档标题（目录条目）：用书签实现可点击跳转
+              runs.push(new InternalHyperlink({ anchor, children: linkChildren }));
+            } else if ((el.getAttribute('href') || '').startsWith('#')) {
+              // 站内锚点但没匹配到标题，退化为普通文本，避免生成无效链接
+              runs.push(new TextRun({ text: linkText, color: this.rgbToHex(style.color) || '0563C1', underline: {} }));
+            } else {
+              runs.push(new ExternalHyperlink({ link: el.getAttribute('href') || '', children: linkChildren }));
+            }
             break;
           case 'DEL': runOptions.strike = true; runs.push(new TextRun(runOptions)); break;
           case 'STRONG':
@@ -1292,7 +1530,14 @@ export default class DocxExporterPlugin extends Plugin {
           currentParagraphOptions.heading = HeadingLevel[tagName as keyof typeof HeadingLevel];
           currentParagraphOptions.spacing = { after: 150 };
           const headingChildren = await this.parseInlineElements(el, sourcePath);
-          if (headingChildren.length > 0) { docxObjects.push(new Paragraph({ ...currentParagraphOptions, children: headingChildren })); }
+          if (headingChildren.length > 0) {
+            // 给标题加书签，目录里的内部链接才能跳转过来
+            const bookmark = this.getHeadingBookmark(el.textContent ?? '');
+            const headingRuns: InlineRun[] = bookmark
+              ? [new Bookmark({ id: bookmark, children: headingChildren })]
+              : headingChildren;
+            docxObjects.push(new Paragraph({ ...currentParagraphOptions, children: headingRuns }));
+          }
           break;
         case 'P':
         case 'DIV':
@@ -1304,12 +1549,12 @@ export default class DocxExporterPlugin extends Plugin {
           break;
         case 'UL':
         case 'OL':
-          docxObjects.push(...await this.parseListElement(
-            el as HTMLUListElement | HTMLOListElement,
-            0,
-            bodyBgColor,
-            sourcePath
-          ));
+          const listElement = el as HTMLUListElement | HTMLOListElement;
+          if (this.isTocList(listElement)) {
+            docxObjects.push(...await this.parseTocListElement(listElement, 0, sourcePath));
+          } else {
+            docxObjects.push(...await this.parseListElement(listElement, 0, bodyBgColor, sourcePath));
+          }
           break;
         case 'HR':
           docxObjects.push(new Paragraph({ thematicBreak: true }));
@@ -1328,6 +1573,11 @@ export default class DocxExporterPlugin extends Plugin {
           break;
         case 'PRE':
           const codeElement = el.querySelector('code');
+          if (codeElement && this.isTocCodeBlock(codeElement)) {
+            // 目录插件未启用时，代码块不会被展开，这里自行生成可跳转的目录
+            docxObjects.push(...this.buildTableOfContents(el.textContent ?? ''));
+            break;
+          }
           if (codeElement) {
             currentParagraphOptions.style = "SourceCode";
             currentParagraphOptions.spacing = {};
@@ -1350,8 +1600,7 @@ export default class DocxExporterPlugin extends Plugin {
           break;
         case 'A':
           const linkTextRuns = await this.parseInlineElements(el, sourcePath);
-          const hyperlink = new ExternalHyperlink({ link: el.getAttribute('href') || '', children: linkTextRuns });
-          docxObjects.push(new Paragraph({ children: [hyperlink], font: mainFont }));
+          docxObjects.push(new Paragraph({ children: linkTextRuns, font: mainFont }));
           break;
         default:
           const defaultChildren = await this.parseInlineElements(el, sourcePath);
@@ -1404,8 +1653,7 @@ export default class DocxExporterPlugin extends Plugin {
           children.push(new Paragraph({ font: mainFont }));
         } else if (tagName === 'A') {
           const linkTextRuns = await this.parseInlineElements(el, sourcePath);
-          const hyperlink = new ExternalHyperlink({ link: el.getAttribute('href') || '', children: linkTextRuns });
-          children.push(new Paragraph({ children: [hyperlink], font: mainFont }));
+          children.push(new Paragraph({ children: linkTextRuns, font: mainFont }));
         } else {
           const inlineChildren = await this.parseInlineElements(el, sourcePath);
           if (inlineChildren.length > 0) {
@@ -1577,8 +1825,34 @@ export default class DocxExporterPlugin extends Plugin {
     }
   }
 
+  // docx 库给每个 Bookmark 都生成同样的数字 id，Word 会因为 id 重复而报“内容有问题”，
+  // 这里按顺序重新编号，保证 w:id 唯一
+  private async fixBookmarkIdsInZip(zip: JSZip): Promise<void> {
+    const docPath = 'word/document.xml';
+    const docFile = zip.file(docPath);
+    if (!docFile) return;
+
+    let xml = await docFile.async('string');
+    if (!xml.includes('w:bookmarkStart')) return;
+
+    let startCounter = 0;
+    xml = xml.replace(/<w:bookmarkStart\b([^>]*?)\/?>/g, (_match, attrs: string) => {
+      startCounter++;
+      return `<w:bookmarkStart${attrs.replace(/w:id="[^"]*"/, `w:id="${startCounter}"`)}/>`;
+    });
+    let endCounter = 0;
+    xml = xml.replace(/<w:bookmarkEnd\b([^>]*?)\/?>/g, (_match, attrs: string) => {
+      endCounter++;
+      return `<w:bookmarkEnd${attrs.replace(/w:id="[^"]*"/, `w:id="${endCounter}"`)}/>`;
+    });
+    zip.file(docPath, xml);
+  }
+
   private async fixDocxBlobAuto(blob: Blob): Promise<Blob> {
     const zip = await JSZip.loadAsync(blob);
+
+    // 修正书签 id（目录跳转依赖它）
+    await this.fixBookmarkIdsInZip(zip);
 
     const mediaEntries = Object.keys(zip.files).filter(name => name.startsWith('word/media/') && !name.endsWith('/'));
     if (mediaEntries.length === 0) {
@@ -1670,6 +1944,9 @@ export default class DocxExporterPlugin extends Plugin {
       const component = new Component();
       await MarkdownRenderer.render(this.app, markdownContent, tempDiv, sourcePath, component);
       component.unload();
+
+      // 先扫描全部标题并建立书签映射，保证目录链接（通常出现在标题之前）能正确指向
+      this.collectHeadingBookmarks(tempDiv);
 
       // 重置图片计数器并显示开始导出提示
       this.totalNetworkImages = this.countNetworkImages(tempDiv);
