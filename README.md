@@ -14,6 +14,7 @@ The biggest advantage of this plugin is its **zero external dependencies**. It d
 * **Cross-Platform Support**: Works on Windows, macOS, Linux, iOS, and Android without the need for additional software.
 * **Rich Text Export**: Supports exporting various Markdown formats, including headings, bold, italics, lists, hyperlinks, and code blocks.
 * **Image Support**: Can export local and web images from notes, and automatically handles image formats and dimensions.
+* **SVG Support**: On desktop, SVG images (local, remote, or vector graphics referenced by relative path) are rasterized to PNG with the bundled `rsvg-convert` before embedding, rendered at 2x the display size for sharp output. On mobile, where the tool is unavailable, the original SVG is embedded as before.
 * **Compatibility**: The generated DOCX files have good compatibility with Microsoft Word.
 
 ## Known Issues and Workarounds
@@ -43,3 +44,6 @@ This plugin uses the following open-source projects and libraries in its develop
 * **[docx](https://github.com/dolanmiu/docx)**
     * **License:** MIT
     * **Description:** A powerful library for generating DOCX files in pure JavaScript/TypeScript.
+* **[librsvg (rsvg-convert)](https://gitlab.gnome.org/GNOME/librsvg)**
+    * **License:** LGPL-2.1-or-later
+    * **Description:** Bundled Windows binary used to rasterize SVG images to PNG before embedding them into the DOCX (desktop only).

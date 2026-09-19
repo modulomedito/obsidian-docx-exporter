@@ -58,7 +58,9 @@ const locales = {
     "BUTTON_SAVE": "Save",
     "INVALID_FILE_PATH": "Invalid file path. Please enter a valid path.",
     "EXPORTING_START": "Starting DOCX export...",
-    "DOWNLOADING_IMAGE": "Downloading image {0} of {1}..."
+    "DOWNLOADING_IMAGE": "Downloading image {0} of {1}...",
+    "SVG_CONVERTING": "Converting SVG image: {0}",
+    "SVG_CONVERT_FAILED": "SVG conversion failed for: {0}, embedding the original file."
   },
   zh: {
     "PLUGIN_NAME": "DOCX 导出器",
@@ -87,7 +89,9 @@ const locales = {
     "INVALID_FILE_PATH": "无效的文件路径。请输入一个有效的路径。",
     "FILE_SAVE_LOCATION_NOTICE": "已将 DOCX 文件导出到和笔记文件相同的文件夹内。",
     "EXPORTING_START": "开始导出 DOCX...",
-    "DOWNLOADING_IMAGE": "正在下载第 {0} 张图片，共 {1} 张..."
+    "DOWNLOADING_IMAGE": "正在下载第 {0} 张图片，共 {1} 张...",
+    "SVG_CONVERTING": "正在转换 SVG 图片：{0}",
+    "SVG_CONVERT_FAILED": "SVG 转换失败：{0}，将嵌入原始文件。"
   },
   'zh-tw': {
     "PLUGIN_NAME": "DOCX 匯出器",
@@ -116,7 +120,9 @@ const locales = {
     "INVALID_FILE_PATH": "無效的文件路徑。請輸入一個有效的路徑。",
     "FILE_SAVE_LOCATION_NOTICE": "已將 DOCX 文件匯出到和筆記文件相同的資料夾內。",
     "EXPORTING_START": "開始匯出 DOCX...",
-    "DOWNLOADING_IMAGE": "正在下載第 {0} 張圖片，共 {1} 張..."
+    "DOWNLOADING_IMAGE": "正在下載第 {0} 張圖片，共 {1} 張...",
+    "SVG_CONVERTING": "正在轉換 SVG 圖片：{0}",
+    "SVG_CONVERT_FAILED": "SVG 轉換失敗：{0}，將嵌入原始檔案。"
   },
   ja: {
     "PLUGIN_NAME": "DOCXエクスポート",
@@ -145,7 +151,9 @@ const locales = {
     "INVALID_FILE_PATH": "無効なファイルパスです。有効なパスを入力してください。",
     "FILE_SAVE_LOCATION_NOTICE": "DOCXファイルはノートと同じフォルダにエクスポートされました。",
     "EXPORTING_START": "DOCXのエクスポートを開始しています...",
-    "DOWNLOADING_IMAGE": "画像 {0}/{1} をダウンロード中..."
+    "DOWNLOADING_IMAGE": "画像 {0}/{1} をダウンロード中...",
+    "SVG_CONVERTING": "SVG画像を変換中: {0}",
+    "SVG_CONVERT_FAILED": "SVGの変換に失敗しました: {0}。元のファイルを埋め込みます。"
   },
   ko: {
     "PLUGIN_NAME": "DOCX 내보내기",
@@ -174,7 +182,9 @@ const locales = {
     "INVALID_FILE_PATH": "잘못된 파일 경로입니다. 유효한 경로를 입력하십시오。",
     "FILE_SAVE_LOCATION_NOTICE": "DOCX 파일은 노트와 동일한 폴더에 내보내졌습니다。",
     "EXPORTING_START": "DOCX 내보내기를 시작하는 중...",
-    "DOWNLOADING_IMAGE": "이미지 다운로드 중 ({0}/{1})..."
+    "DOWNLOADING_IMAGE": "이미지 다운로드 중 ({0}/{1})...",
+    "SVG_CONVERTING": "SVG 이미지 변환 중: {0}",
+    "SVG_CONVERT_FAILED": "SVG 변환 실패: {0}, 원본 파일을 삽입합니다."
   },
   fr: {
     "PLUGIN_NAME": "Exportateur DOCX",
@@ -203,7 +213,9 @@ const locales = {
     "INVALID_FILE_PATH": "Chemin de fichier invalide. Veuillez entrer un chemin valide.",
     "FILE_SAVE_LOCATION_NOTICE": "Le fichier DOCX a été exporté dans le même dossier que le fichier de note.",
     "EXPORTING_START": "Démarrage de l'exportation DOCX...",
-    "DOWNLOADING_IMAGE": "Téléchargement de l'image {0} sur {1}..."
+    "DOWNLOADING_IMAGE": "Téléchargement de l'image {0} sur {1}...",
+    "SVG_CONVERTING": "Conversion de l'image SVG : {0}",
+    "SVG_CONVERT_FAILED": "Échec de la conversion SVG pour : {0}, le fichier d'origine sera intégré."
   },
   es: {
     "PLUGIN_NAME": "Exportador DOCX",
@@ -232,7 +244,9 @@ const locales = {
     "INVALID_FILE_PATH": "Ruta de archivo inválida. Por favor, introduzca una ruta válida.",
     "FILE_SAVE_LOCATION_NOTICE": "El archivo DOCX ha sido exportado a la misma carpeta que el archivo de notas.",
     "EXPORTING_START": "Iniciando exportación a DOCX...",
-    "DOWNLOADING_IMAGE": "Descargando imagen {0} de {1}..."
+    "DOWNLOADING_IMAGE": "Descargando imagen {0} de {1}...",
+    "SVG_CONVERTING": "Convirtiendo imagen SVG: {0}",
+    "SVG_CONVERT_FAILED": "Error al convertir SVG: {0}, se insertará el archivo original."
   },
   ru: {
     "PLUGIN_NAME": "Экспортер DOCX",
@@ -261,7 +275,9 @@ const locales = {
     "INVALID_FILE_PATH": "Неверный путь к файлу. Пожалуйста, введите корректный путь.",
     "FILE_SAVE_LOCATION_NOTICE": "Файл DOCX был экспортирован в ту же папку, что и файл заметки.",
     "EXPORTING_START": "Начало экспорта в DOCX...",
-    "DOWNLOADING_IMAGE": "Загрузка изображения {0} из {1}..."
+    "DOWNLOADING_IMAGE": "Загрузка изображения {0} из {1}...",
+    "SVG_CONVERTING": "Конвертация SVG-изображения: {0}",
+    "SVG_CONVERT_FAILED": "Не удалось конвертировать SVG: {0}, будет вставлен исходный файл."
   },
   it: {
     "PLUGIN_NAME": "Esportatore DOCX",
@@ -290,7 +306,9 @@ const locales = {
     "INVALID_FILE_PATH": "Percorso file non valido. Inserisci un percorso valido.",
     "FILE_SAVE_LOCATION_NOTICE": "Il file DOCX è stato esportato nella stessa cartella del file di nota.",
     "EXPORTING_START": "Avvio esportazione DOCX...",
-    "DOWNLOADING_IMAGE": "Download immagine {0} di {1}..."
+    "DOWNLOADING_IMAGE": "Download immagine {0} di {1}...",
+    "SVG_CONVERTING": "Conversione immagine SVG: {0}",
+    "SVG_CONVERT_FAILED": "Conversione SVG non riuscita per: {0}, verrà incorporato il file originale."
   },
   pt: {
     "PLUGIN_NAME": "Exportador DOCX",
@@ -319,7 +337,9 @@ const locales = {
     "INVALID_FILE_PATH": "Caminho de arquivo inválido. Por favor, insira um caminho válido.",
     "FILE_SAVE_LOCATION_NOTICE": "O arquivo DOCX foi exportado para a mesma pasta do arquivo de nota.",
     "EXPORTING_START": "Iniciando exportação DOCX...",
-    "DOWNLOADING_IMAGE": "Baixando imagem {0} de {1}..."
+    "DOWNLOADING_IMAGE": "Baixando imagem {0} de {1}...",
+    "SVG_CONVERTING": "Convertendo imagem SVG: {0}",
+    "SVG_CONVERT_FAILED": "Falha ao converter SVG: {0}, incorporando o arquivo original."
   },
   tr: {
     "PLUGIN_NAME": "DOCX Dışa Aktarıcı",
@@ -348,7 +368,9 @@ const locales = {
     "INVALID_FILE_PATH": "Geçersiz dosya yolu. Lütfen geçerli bir yol girin.",
     "FILE_SAVE_LOCATION_NOTICE": "DOCX dosyası, not dosyasıyla aynı klasöre aktarıldı.",
     "EXPORTING_START": "DOCX dışa aktarma başlatılıyor...",
-    "DOWNLOADING_IMAGE": "Resim indiriliyor {0}/{1}..."
+    "DOWNLOADING_IMAGE": "Resim indiriliyor {0}/{1}...",
+    "SVG_CONVERTING": "SVG görseli dönüştürülüyor: {0}",
+    "SVG_CONVERT_FAILED": "SVG dönüştürme başarısız: {0}, orijinal dosya gömülüyor."
   },
   de: {
     "PLUGIN_NAME": "DOCX Exportierer",
@@ -377,7 +399,9 @@ const locales = {
     "INVALID_FILE_PATH": "Ungültiger Dateipfad. Bitte geben Sie einen gültigen Pfad ein.",
     "FILE_SAVE_LOCATION_NOTICE": "Die DOCX-Datei wurde im gleichen Ordner wie die Notizdatei exportiert.",
     "EXPORTING_START": "DOCX-Export wird gestartet...",
-    "DOWNLOADING_IMAGE": "Lade Bild {0} von {1}..."
+    "DOWNLOADING_IMAGE": "Lade Bild {0} von {1}...",
+    "SVG_CONVERTING": "SVG-Bild wird konvertiert: {0}",
+    "SVG_CONVERT_FAILED": "SVG-Konvertierung fehlgeschlagen für: {0}, Originaldatei wird eingebettet."
   },
   ar: {
     "PLUGIN_NAME": "مصدّر DOCX",
@@ -406,7 +430,9 @@ const locales = {
     "INVALID_FILE_PATH": "مسار ملف غير صالح. الرجاء إدخال مسار صالح.",
     "FILE_SAVE_LOCATION_NOTICE": "تم تصدير ملف DOCX إلى نفس مجلد ملف الملاحظة.",
     "EXPORTING_START": "جاري بدء تصدير DOCX...",
-    "DOWNLOADING_IMAGE": "جاري تحميل الصورة {0} من {1}..."
+    "DOWNLOADING_IMAGE": "جاري تحميل الصورة {0} من {1}...",
+    "SVG_CONVERTING": "جاري تحويل صورة SVG: {0}",
+    "SVG_CONVERT_FAILED": "فشل تحويل SVG لـ: {0}، سيتم تضمين الملف الأصلي."
   }
 };
 
@@ -470,6 +496,10 @@ export default class DocxExporterPlugin extends Plugin {
 
   private totalNetworkImages = 0;
   private currentImageIndex = 0;
+
+  private nodeModuleCache = new Map<string, any>();
+  private rsvgConverterPath: string | null | undefined = undefined;
+  private svgPngCache = new Map<string, ArrayBuffer>();
 
   async onload() {
     this.i18n = new I18N(this.app);
@@ -555,6 +585,213 @@ export default class DocxExporterPlugin extends Plugin {
     if (mime === 'image/svg+xml') return 'svg';
     if (mime === 'image/webp') return 'webp';
     return null;
+  }
+
+  // --- SVG 转 PNG（调用随插件附带的 rsvg-convert）---
+
+  // 懒加载 Node 模块，移动端不可用
+  private requireNodeModule<T = any>(id: string): T | null {
+    if (this.nodeModuleCache.has(id)) {
+      return (this.nodeModuleCache.get(id) as T) ?? null;
+    }
+    let mod: any = null;
+    try {
+      const req: any = (window as any).require
+        ?? (globalThis as any).require
+        ?? (typeof require === 'function' ? require : null);
+      if (req) mod = req(id);
+    } catch (error) {
+      mod = null;
+    }
+    this.nodeModuleCache.set(id, mod);
+    return mod as T | null;
+  }
+
+  // 定位插件目录下的 rsvg-convert 可执行文件
+  private resolveRsvgConverterPath(): string | null {
+    if (this.rsvgConverterPath !== undefined) return this.rsvgConverterPath;
+    let resolved: string | null = null;
+    try {
+      const pathMod = this.requireNodeModule<any>('path');
+      const fsMod = this.requireNodeModule<any>('fs');
+      const adapter: any = (this.app.vault as any).adapter;
+      const basePath: string = typeof adapter?.getBasePath === 'function' ? adapter.getBasePath() : '';
+      if (pathMod && fsMod && basePath) {
+        const hasProcess = typeof process !== 'undefined';
+        const isWindows = hasProcess && process.platform === 'win32';
+        const fileNames = isWindows ? ['rsvg-convert.exe', 'rsvg-convert'] : ['rsvg-convert', 'rsvg-convert.exe'];
+        // 优先使用插件自带的二进制，其次回退到系统 PATH 中安装的 rsvg-convert
+        const pathEnv: string = hasProcess ? (process.env?.PATH ?? '') : '';
+        const dirs = [
+          this.manifest.dir,
+          `.obsidian/plugins/${this.manifest.id}`,
+          ...pathEnv.split(pathMod.delimiter).filter(Boolean)
+        ];
+        for (const dir of dirs) {
+          if (!dir) continue;
+          for (const fileName of fileNames) {
+            const candidate = pathMod.join(basePath, dir, fileName);
+            try {
+              if (fsMod.existsSync(candidate)) { resolved = candidate; break; }
+            } catch (error) { }
+          }
+          if (resolved) break;
+        }
+      }
+    } catch (error) {
+      resolved = null;
+    }
+    this.rsvgConverterPath = resolved;
+    return resolved;
+  }
+
+  // 判断图片数据是否为 SVG
+  private looksLikeSvg(buffer: ArrayBuffer, extension: string | null): boolean {
+    if (extension && extension.toLowerCase().replace(/^\./, '') === 'svg') return true;
+    try {
+      const head = new Uint8Array(buffer.slice(0, 512));
+      return new TextDecoder().decode(head).includes('<svg');
+    } catch (error) {
+      return false;
+    }
+  }
+
+  // 从 width/height/viewBox 解析 SVG 固有尺寸
+  private getSvgIntrinsicSize(svgText: string): { width: number, height: number } | null {
+    const header = svgText.slice(0, 4096);
+    const readLength = (name: string): { value: number, unit: string } | null => {
+      const match = header.match(new RegExp(`\\s${name}\\s*=\\s*["']([^"']+)["']`, 'i'));
+      if (!match) return null;
+      const value = parseFloat(match[1]);
+      if (isNaN(value) || value <= 0) return null;
+      const unit = (match[1].match(/[a-z%]+/i)?.[0] || 'px').toLowerCase();
+      return { value, unit };
+    };
+    const width = readLength('width');
+    const height = readLength('height');
+    if (width && height && width.unit !== '%' && height.unit !== '%') {
+      return {
+        width: this.svgLengthToPx(width.value, width.unit),
+        height: this.svgLengthToPx(height.value, height.unit)
+      };
+    }
+    const viewBox = header.match(/viewBox\s*=\s*["']([^"']+)["']/i);
+    if (viewBox) {
+      const parts = viewBox[1].trim().split(/[\s,]+/).map(Number);
+      if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+        return { width: parts[2], height: parts[3] };
+      }
+    }
+    return null;
+  }
+
+  // SVG 长度单位转 px
+  private svgLengthToPx(value: number, unit: string): number {
+    switch (unit) {
+      case 'pt': return value * 96 / 72;
+      case 'pc': return value * 16;
+      case 'in': return value * 96;
+      case 'cm': return value * 96 / 2.54;
+      case 'mm': return value * 96 / 25.4;
+      case 'em': case 'ex': case 'rem': return value * 16;
+      default: return value;
+    }
+  }
+
+  // 计算 SVG 在文档中应显示的尺寸
+  private resolveSvgDisplaySize(
+    imgEl: HTMLImageElement,
+    intrinsic: { width: number, height: number } | null
+  ): { width: number, height: number } {
+    const styleWidth = parseFloat(imgEl.style.width) || imgEl.width || 0;
+    const styleHeight = parseFloat(imgEl.style.height) || imgEl.height || 0;
+    const naturalWidth = imgEl.naturalWidth > 0 ? imgEl.naturalWidth : 0;
+    const naturalHeight = imgEl.naturalHeight > 0 ? imgEl.naturalHeight : 0;
+
+    let width = styleWidth || intrinsic?.width || naturalWidth || 0;
+    let height = styleHeight || intrinsic?.height || naturalHeight || 0;
+
+    if (width > 0 && height <= 0) {
+      const ratio = intrinsic
+        ? intrinsic.height / intrinsic.width
+        : (naturalWidth && naturalHeight ? naturalHeight / naturalWidth : 0.75);
+      height = width * ratio;
+    } else if (height > 0 && width <= 0) {
+      const ratio = intrinsic
+        ? intrinsic.width / intrinsic.height
+        : (naturalWidth && naturalHeight ? naturalWidth / naturalHeight : 4 / 3);
+      width = height * ratio;
+    }
+
+    if (width <= 0 || height <= 0) { width = 550; height = 300; }
+    return { width: Math.round(width), height: Math.round(height) };
+  }
+
+  private hashText(text: string): string {
+    let hash = 5381;
+    for (let i = 0; i < text.length; i++) {
+      hash = ((hash << 5) + hash + text.charCodeAt(i)) >>> 0;
+    }
+    return hash.toString(36);
+  }
+
+  // 调用 rsvg-convert 将 SVG 渲染为 PNG（按显示宽度的 2 倍渲染以保证清晰度）
+  private async convertSvgToPng(svgText: string, displayWidth: number): Promise<ArrayBuffer | null> {
+    const cacheKey = `${this.hashText(svgText)}-${displayWidth}`;
+    const cached = this.svgPngCache.get(cacheKey);
+    if (cached) return cached;
+
+    const fsMod = this.requireNodeModule<any>('fs');
+    const osMod = this.requireNodeModule<any>('os');
+    const pathMod = this.requireNodeModule<any>('path');
+    const childProcessMod = this.requireNodeModule<any>('child_process');
+    const converterPath = this.resolveRsvgConverterPath();
+    if (!fsMod || !osMod || !pathMod || !childProcessMod?.execFile || !converterPath) return null;
+
+    const tmpDir = osMod.tmpdir();
+    const uniqueId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    const svgFilePath = pathMod.join(tmpDir, `obsidian-docx-${uniqueId}.svg`);
+    const pngFilePath = pathMod.join(tmpDir, `obsidian-docx-${uniqueId}.png`);
+    const renderWidth = Math.max(32, Math.min(3000, Math.round(displayWidth * 2)));
+
+    const cleanup = () => {
+      try { if (fsMod.existsSync(svgFilePath)) fsMod.unlinkSync(svgFilePath); } catch (error) { }
+      try { if (fsMod.existsSync(pngFilePath)) fsMod.unlinkSync(pngFilePath); } catch (error) { }
+    };
+
+    try {
+      await fsMod.promises.writeFile(svgFilePath, new TextEncoder().encode(svgText));
+      const argSets: string[][] = [
+        ['-f', 'png', '-a', '-b', 'white', '-w', String(renderWidth), '-o', pngFilePath, svgFilePath],
+        ['-f', 'png', '-a', '-w', String(renderWidth), '-o', pngFilePath, svgFilePath]
+      ];
+      let lastError: any = null;
+      for (const args of argSets) {
+        lastError = await new Promise<any>(resolve => {
+          childProcessMod.execFile(
+            converterPath,
+            args,
+            { windowsHide: true, timeout: 30000, cwd: tmpDir },
+            (error: any) => resolve(error ?? null)
+          );
+        });
+        if (!lastError) break;
+      }
+      if (lastError) {
+        cleanup();
+        return null;
+      }
+
+      const data: Uint8Array = await fsMod.promises.readFile(pngFilePath);
+      const result = new Uint8Array(data.length);
+      result.set(data);
+      this.svgPngCache.set(cacheKey, result.buffer);
+      cleanup();
+      return result.buffer;
+    } catch (error) {
+      cleanup();
+      return null;
+    }
   }
 
   // 转义正则
@@ -834,34 +1071,64 @@ export default class DocxExporterPlugin extends Plugin {
         return null;
       }
 
-      let width = 550;
-      let height = 300;
-      const dimensionsFromBuffer = this.getImageDimensionsFromBuffer(buffer);
-      let naturalWidth = dimensionsFromBuffer?.width;
-      let naturalHeight = dimensionsFromBuffer?.height;
-
-      if (!naturalWidth || !naturalHeight) {
-        naturalWidth = imgEl.naturalWidth > 0 ? imgEl.naturalWidth : undefined;
-        naturalHeight = imgEl.naturalHeight > 0 ? imgEl.naturalHeight : undefined;
+      // SVG 无法被 Word 稳定渲染，先用 rsvg-convert 栅格化为 PNG 再嵌入
+      let svgDisplaySize: { width: number, height: number } | null = null;
+      if (this.looksLikeSvg(buffer, imageExtension)) {
+        const svgText = new TextDecoder().decode(new Uint8Array(buffer));
+        svgDisplaySize = this.resolveSvgDisplaySize(imgEl, this.getSvgIntrinsicSize(svgText));
+        // 只有在 rsvg-convert 可用时才转换（移动端没有 Node 环境，保持原样嵌入）
+        if (this.resolveRsvgConverterPath()) {
+          const shortPath = pathForNotice.length > 50 ? `${pathForNotice.substring(0, 50)}...` : pathForNotice;
+          new Notice(this.i18n.t("SVG_CONVERTING", shortPath));
+          const pngBuffer = await this.convertSvgToPng(svgText, svgDisplaySize.width);
+          if (pngBuffer) {
+            buffer = pngBuffer;
+            imageExtension = 'png';
+          } else {
+            new Notice(this.i18n.t("SVG_CONVERT_FAILED", shortPath));
+          }
+        }
       }
 
-      const styleWidth = parseFloat(imgEl.style.width) || imgEl.width;
-      const styleHeight = parseFloat(imgEl.style.height) || imgEl.height;
+      const maxWidth = 550;
+      let finalWidth: number;
+      let finalHeight: number;
 
-      let finalWidth = styleWidth || naturalWidth;
-      let finalHeight = styleHeight || (finalWidth && naturalWidth ? (finalWidth / naturalWidth) * naturalHeight : undefined);
-
-      if (!finalWidth || !finalHeight || finalWidth <= 0 || finalHeight <= 0) {
-        finalWidth = width;
-        finalHeight = height;
+      if (svgDisplaySize) {
+        finalWidth = svgDisplaySize.width;
+        finalHeight = svgDisplaySize.height;
       } else {
-        finalWidth = Math.round(finalWidth);
-        finalHeight = Math.round(finalHeight);
+        const dimensionsFromBuffer = this.getImageDimensionsFromBuffer(buffer);
+        let naturalWidth = dimensionsFromBuffer?.width;
+        let naturalHeight = dimensionsFromBuffer?.height;
 
-        if (finalWidth > width) {
-          finalHeight = Math.round((width / finalWidth) * finalHeight);
-          finalWidth = width;
+        if (!naturalWidth || !naturalHeight) {
+          naturalWidth = imgEl.naturalWidth > 0 ? imgEl.naturalWidth : undefined;
+          naturalHeight = imgEl.naturalHeight > 0 ? imgEl.naturalHeight : undefined;
         }
+
+        const styleWidth = parseFloat(imgEl.style.width) || imgEl.width;
+        const styleHeight = parseFloat(imgEl.style.height) || imgEl.height;
+
+        finalWidth = styleWidth || naturalWidth || 0;
+        finalHeight = styleHeight || (finalWidth && naturalWidth && naturalHeight ? (finalWidth / naturalWidth) * naturalHeight : 0);
+
+        if (!finalWidth || !finalHeight || finalWidth <= 0 || finalHeight <= 0) {
+          finalWidth = maxWidth;
+          finalHeight = 300;
+        } else {
+          finalWidth = Math.round(finalWidth);
+          finalHeight = Math.round(finalHeight);
+        }
+      }
+
+      finalWidth = Math.round(finalWidth);
+      finalHeight = Math.round(finalHeight);
+      if (finalWidth <= 0) finalWidth = maxWidth;
+      if (finalHeight <= 0) finalHeight = 300;
+      if (finalWidth > maxWidth) {
+        finalHeight = Math.round((maxWidth / finalWidth) * finalHeight);
+        finalWidth = maxWidth;
       }
 
       return new ImageRun({
