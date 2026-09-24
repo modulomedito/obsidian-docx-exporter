@@ -1119,9 +1119,11 @@ export default class DocxExporterPlugin extends Plugin {
     return runs;
   }
 
-  // docx 默认页面（A4 11906 twips + 左右各 1 英寸页边距 1440）下正文可用宽度
+  // docx 默认页面（A4 11906 twips + 上下左右各 1 英寸页边距 1440）下正文可用宽高
   private readonly pageContentTwips = 9026;
   private readonly pageContentWidthPx = 602;
+  // 正文可用高度（A4 11906 - 上下页边距各 1440 = 9026 twips ≈ 602px @96dpi）
+  private readonly pageContentHeightPx = 602;
   // 单元格左右内边距：各 100 twips
   private readonly cellMarginPx = 2 * (100 / 20) * (96 / 72);
 
@@ -1189,6 +1191,13 @@ export default class DocxExporterPlugin extends Plugin {
     if (!size.width || size.width <= maxWidth) return size;
     const height = Math.max(1, Math.round((maxWidth / size.width) * size.height));
     return { width: Math.round(maxWidth), height };
+  }
+
+  // 按最大高度等比缩放，避免图片过高超出页面被裁剪
+  private clampImageHeight(size: { width: number, height: number }, maxHeight: number): { width: number, height: number } {
+    if (!size.height || size.height <= maxHeight) return size;
+    const width = Math.max(1, Math.round((maxHeight / size.height) * size.width));
+    return { width, height: Math.round(maxHeight) };
   }
 
   // 解析列表（支持多级缩进和有序/无序）
@@ -1554,6 +1563,8 @@ export default class DocxExporterPlugin extends Plugin {
         svgDisplaySize = this.resolveSvgDisplaySize(imgEl, this.getSvgIntrinsicSize(svgText));
         // 先按可用宽度收敛，再按收敛后的宽度渲染 PNG，避免生成超大位图
         svgDisplaySize = this.clampImageSize(svgDisplaySize, maxImageWidth);
+        // 再按页面可用高度收敛，避免图片过高超出页面被裁剪
+        svgDisplaySize = this.clampImageHeight(svgDisplaySize, this.pageContentHeightPx);
         // 只有在 rsvg-convert 可用时才转换（移动端没有 Node 环境，保持原样嵌入）
         if (this.resolveRsvgConverterPath()) {
           const shortPath = pathForNotice.length > 50 ? `${pathForNotice.substring(0, 50)}...` : pathForNotice;
@@ -1607,6 +1618,11 @@ export default class DocxExporterPlugin extends Plugin {
       if (finalWidth > maxWidth) {
         finalHeight = Math.round((maxWidth / finalWidth) * finalHeight);
         finalWidth = maxWidth;
+      }
+      // 图片高度超过页面可用高度时等比缩小，确保整张图片完整显示而不被裁剪
+      if (finalHeight > this.pageContentHeightPx) {
+        finalWidth = Math.round((this.pageContentHeightPx / finalHeight) * finalWidth);
+        finalHeight = this.pageContentHeightPx;
       }
 
       // 便于排查：控制台里能看到每张图片最终用的宽度上限与尺寸
@@ -2152,6 +2168,11 @@ export default class DocxExporterPlugin extends Plugin {
     return zip.generateAsync({ type: 'blob' });
   }
 
+  // 去掉文件开头的 YAML frontmatter（--- ... ---），导出 docx 时不应包含元数据
+  private stripYamlFrontmatter(content: string): string {
+    return content.replace(/^﻿?---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
+  }
+
   async exportCurrentNoteToDocx() {
     const activeFile = this.app.workspace.getActiveFile();
     if (!activeFile) { new Notice(this.i18n.t("NO_ACTIVE_FILE")); return; }
@@ -2161,7 +2182,9 @@ export default class DocxExporterPlugin extends Plugin {
 
     try {
       document.body.appendChild(tempDiv);
-      const markdownContent = await this.app.vault.read(activeFile);
+      let markdownContent = await this.app.vault.read(activeFile);
+      // 导出时忽略 YAML frontmatter（文件开头的 --- ... --- 代码块）
+      markdownContent = this.stripYamlFrontmatter(markdownContent);
       const sourcePath = activeFile.path;
 
       const component = new Component();
