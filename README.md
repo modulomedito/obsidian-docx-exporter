@@ -15,6 +15,7 @@ The biggest advantage of this plugin is its **zero external dependencies**. It d
 * **Rich Text Export**: Supports exporting various Markdown formats, including headings, bold, italics, lists, hyperlinks, and code blocks.
 * **Image Support**: Can export local and web images from notes, and automatically handles image formats and dimensions.
 * **SVG Support**: On desktop, SVG images (local, remote, or vector graphics referenced by relative path) are rasterized to PNG with the bundled `rsvg-convert` before embedding, rendered at 2x the display size for sharp output. On mobile, where the tool is unavailable, the original SVG is embedded as before.
+* **Mermaid Diagrams**: ```mermaid blocks are rendered with the bundled Mermaid engine and embedded as images (centered, scaled to the page width, rasterized at 2x for sharp output). Works on desktop and mobile; if rendering fails, the code block is exported as text.
 * **Compatibility**: The generated DOCX files have good compatibility with Microsoft Word.
 * **Table of Contents**: ```table-of-contents blocks (e.g. from the *Automatic Table Of Contents* plugin) are exported as clickable entries that jump to the corresponding heading, using real Word bookmarks. Headings are bookmarked automatically, so internal `#heading` links work too.
 
@@ -48,3 +49,6 @@ This plugin uses the following open-source projects and libraries in its develop
 * **[librsvg (rsvg-convert)](https://gitlab.gnome.org/GNOME/librsvg)**
     * **License:** LGPL-2.1-or-later
     * **Description:** Bundled Windows binary used to rasterize SVG images to PNG before embedding them into the DOCX (desktop only).
+* **[Mermaid](https://github.com/mermaid-js/mermaid)**
+    * **License:** MIT
+    * **Description:** Bundled library used to render ```mermaid code blocks into SVG so the diagram can be embedded as an image.

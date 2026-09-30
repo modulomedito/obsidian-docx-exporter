@@ -67,7 +67,9 @@ const locales = {
     "EXPORTING_START": "Starting DOCX export...",
     "DOWNLOADING_IMAGE": "Downloading image {0} of {1}...",
     "SVG_CONVERTING": "Converting SVG image: {0}",
-    "SVG_CONVERT_FAILED": "SVG conversion failed for: {0}, embedding the original file."
+    "SVG_CONVERT_FAILED": "SVG conversion failed for: {0}, embedding the original file.",
+    "MERMAID_RENDERING": "Rendering Mermaid diagram...",
+    "MERMAID_RENDER_FAILED": "Mermaid diagram rendering failed, exporting it as a code block."
   },
   zh: {
     "PLUGIN_NAME": "DOCX 导出器",
@@ -98,7 +100,9 @@ const locales = {
     "EXPORTING_START": "开始导出 DOCX...",
     "DOWNLOADING_IMAGE": "正在下载第 {0} 张图片，共 {1} 张...",
     "SVG_CONVERTING": "正在转换 SVG 图片：{0}",
-    "SVG_CONVERT_FAILED": "SVG 转换失败：{0}，将嵌入原始文件。"
+    "SVG_CONVERT_FAILED": "SVG 转换失败：{0}，将嵌入原始文件。",
+    "MERMAID_RENDERING": "正在渲染 Mermaid 图表...",
+    "MERMAID_RENDER_FAILED": "Mermaid 图表渲染失败，将按代码块导出。"
   },
   'zh-tw': {
     "PLUGIN_NAME": "DOCX 匯出器",
@@ -129,7 +133,9 @@ const locales = {
     "EXPORTING_START": "開始匯出 DOCX...",
     "DOWNLOADING_IMAGE": "正在下載第 {0} 張圖片，共 {1} 張...",
     "SVG_CONVERTING": "正在轉換 SVG 圖片：{0}",
-    "SVG_CONVERT_FAILED": "SVG 轉換失敗：{0}，將嵌入原始檔案。"
+    "SVG_CONVERT_FAILED": "SVG 轉換失敗：{0}，將嵌入原始檔案。",
+    "MERMAID_RENDERING": "正在渲染 Mermaid 圖表...",
+    "MERMAID_RENDER_FAILED": "Mermaid 圖表渲染失敗，將按程式碼區塊匯出。"
   },
   ja: {
     "PLUGIN_NAME": "DOCXエクスポート",
@@ -517,6 +523,10 @@ export default class DocxExporterPlugin extends Plugin {
   private headingEntries: { level: number, text: string, bookmark: string }[] = [];
   // 原始 Markdown 中 ```table-of-contents 代码块的选项（按出现顺序）
   private tocOptionQueue: string[] = [];
+  // 原始 Markdown 中 ```mermaid 代码块的源码（按出现顺序）
+  private mermaidSourceQueue: string[] = [];
+  private mermaidModule: any = undefined;
+  private mermaidRenderCounter = 1;
 
   async onload() {
     this.i18n = new I18N(this.app);
@@ -695,13 +705,25 @@ export default class DocxExporterPlugin extends Plugin {
     return new TextRun({ text, style: "Hyperlink", color: '0563C1', underline: {} });
   }
 
-  // ```table-of-contents / ```toc 代码块（可能是 pre>code，也可能是已渲染的容器）
-  private isTocCodeBlock(el: HTMLElement): boolean {
+  // 代码块语言匹配（可能是 pre>code，也可能是已渲染的容器）
+  private isCodeBlockWithLanguage(el: HTMLElement, ...languages: string[]): boolean {
     const classesOf = (node: HTMLElement) => Array.from(node.classList).map(cls => cls.toLowerCase());
     const classes = classesOf(el);
     const codeEl = el.tagName?.toUpperCase() === 'CODE' ? el : el.querySelector('code');
     const codeClasses = codeEl ? classesOf(codeEl as HTMLElement) : [];
-    return [...classes, ...codeClasses].some(cls => cls === 'language-table-of-contents' || cls === 'language-toc');
+    const wanted = languages.map(lang => `language-${lang.toLowerCase()}`);
+    return [...classes, ...codeClasses].some(cls => wanted.includes(cls));
+  }
+
+  // 已渲染成独立块的语言容器（如 block-language-mermaid）
+  private isBlockLanguage(el: HTMLElement, ...languages: string[]): boolean {
+    const classes = Array.from(el.classList).map(cls => cls.toLowerCase());
+    return classes.some(cls => languages.some(lang => cls === `block-language-${lang.toLowerCase()}`));
+  }
+
+  // ```mermaid 代码块：未渲染时是 pre>code，渲染后是 block-language-mermaid 容器
+  private isMermaidBlock(el: HTMLElement): boolean {
+    return this.isCodeBlockWithLanguage(el, 'mermaid') || this.isBlockLanguage(el, 'mermaid');
   }
 
   // 分页标记：<div class="page-break" style="page-break-before: always;"></div>
@@ -715,24 +737,24 @@ export default class DocxExporterPlugin extends Plugin {
 
   // 目录占位元素：可能带 block-language-* 类名，也可能仍是未展开的代码块
   private isTocPlaceholder(el: HTMLElement): boolean {
-    if (this.isTocCodeBlock(el)) return true;
-    const classes = Array.from(el.classList).map(cls => cls.toLowerCase());
-    if (classes.some(cls => cls === 'block-language-table-of-contents' || cls === 'block-language-toc')) return true;
+    if (this.isCodeBlockWithLanguage(el, 'table-of-contents', 'toc')) return true;
+    if (this.isBlockLanguage(el, 'table-of-contents', 'toc')) return true;
     try {
       if (el.querySelector(':scope > .block-language-table-of-contents, :scope > .block-language-toc')) return true;
     } catch (error) { }
     return false;
   }
 
-  // 从原始 Markdown 中按顺序取出 ```table-of-contents / ```toc 代码块的内容（含选项）
-  private parseTocBlocksFromMarkdown(markdown: string): string[] {
+  // 从原始 Markdown 中按顺序取出指定语言 ```xxx 代码块的内容
+  private parseFencedBlocksFromMarkdown(markdown: string, language: RegExp): string[] {
     const blocks: string[] = [];
     let inBlock = false;
     let buffer: string[] = [];
     for (const rawLine of (markdown ?? '').split('\n')) {
       const line = rawLine.trim();
       if (!inBlock) {
-        if (/^`{3,}\s*(table-of-contents|toc)\s*$/i.test(line)) {
+        const fence = line.match(/^(`{3,})\s*(\S*)\s*$/);
+        if (fence && language.test(fence[2])) {
           inBlock = true;
           buffer = [];
         }
@@ -1091,6 +1113,108 @@ export default class DocxExporterPlugin extends Plugin {
       cleanup();
       return null;
     }
+  }
+
+  // --- Mermaid 图表渲染 ---
+  // 说明：Obsidian 阅读视图里 mermaid 由内置渲染器显示，这里只为导出重新渲染一次，
+  // 这样无论用户的 Obsidian 版本是否内置 mermaid，导出的 docx 里都是图而不是代码
+
+  // 懒加载 mermaid（体积较大，只有笔记里真有 mermaid 代码块时才初始化）
+  private async getMermaid(): Promise<any> {
+    if (this.mermaidModule !== undefined) return this.mermaidModule;
+    let mermaid: any = null;
+    try {
+      const mod: any = await import('mermaid');
+      mermaid = mod?.default ?? mod;
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        // 用 <text> 而不是 foreignObject 画标签，栅格化时才不会丢字
+        htmlLabels: false
+      });
+    } catch (error) {
+      console.error('[DOCX Exporter] Failed to load mermaid:', error);
+      mermaid = null;
+    }
+    this.mermaidModule = mermaid;
+    return mermaid;
+  }
+
+  private async renderMermaidSvg(source: string): Promise<string | null> {
+    const mermaid = await this.getMermaid();
+    if (!mermaid) return null;
+    try {
+      const result = await mermaid.render(`docx-mermaid-${this.mermaidRenderCounter++}`, source);
+      return result?.svg ?? null;
+    } catch (error) {
+      console.error('[DOCX Exporter] Failed to render mermaid diagram:', error);
+      return null;
+    }
+  }
+
+  // 补上显式宽高，浏览器才能按目标尺寸栅格化（mermaid 默认只给 max-width）
+  private ensureSvgSize(svgText: string, width: number, height: number): string {
+    const rootEnd = svgText.indexOf('>');
+    if (rootEnd < 0) return svgText;
+    const rootTag = svgText.slice(0, rootEnd);
+    if (/\swidth\s*=/i.test(rootTag)) return svgText;
+    return `${rootTag} width="${width}" height="${height}"${svgText.slice(rootEnd)}`;
+  }
+
+  // SVG 文本 -> PNG（浏览器内完成，桌面端和移动端都能用）
+  private async rasterizeSvgToPng(svgText: string, width: number, height: number): Promise<ArrayBuffer | null> {
+    try {
+      const image = new Image();
+      image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}`;
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () => reject(new Error('SVG load failed'));
+      });
+      const scale = 2; // 2 倍采样，Word 里放大也不糊
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(width * scale));
+      canvas.height = Math.max(1, Math.round(height * scale));
+      const context = canvas.getContext('2d');
+      if (!context) return null;
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+      return blob ? await blob.arrayBuffer() : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  // mermaid 代码块 -> 图片；渲染或栅格化失败时返回 null，由调用方退回代码块导出
+  private async createMermaidImageRun(source: string, maxWidth: number): Promise<ImageRun | null> {
+    if (!source?.trim()) return null;
+    new Notice(this.i18n.t("MERMAID_RENDERING"));
+    const svgText = await this.renderMermaidSvg(source);
+    if (!svgText) {
+      new Notice(this.i18n.t("MERMAID_RENDER_FAILED"));
+      return null;
+    }
+
+    let size = this.getSvgIntrinsicSize(svgText) ?? { width: maxWidth, height: Math.round(maxWidth * 0.6) };
+    size = this.clampImageSize(size, maxWidth);
+    size = this.clampImageHeight(size, this.pageContentHeightPx);
+
+    let buffer = await this.rasterizeSvgToPng(this.ensureSvgSize(svgText, size.width, size.height), size.width, size.height);
+    // 浏览器栅格化失败时退回随插件附带的 rsvg-convert（仅桌面端）
+    if (!buffer) buffer = await this.convertSvgToPng(svgText, size.width);
+    if (!buffer) {
+      new Notice(this.i18n.t("MERMAID_RENDER_FAILED"));
+      return null;
+    }
+
+    console.log(`[DOCX Exporter] mermaid: maxWidth=${maxWidth} | size=${size.width}x${size.height}`);
+    return new ImageRun({ data: buffer, transformation: { width: size.width, height: size.height } });
+  }
+
+  private takeMermaidSource(el: HTMLElement): string {
+    if (this.mermaidSourceQueue.length > 0) return this.mermaidSourceQueue.shift() as string;
+    return el.querySelector('code')?.textContent ?? el.textContent ?? '';
   }
 
   // 转义正则
@@ -1703,6 +1827,20 @@ export default class DocxExporterPlugin extends Plugin {
         continue;
       }
 
+      // ```mermaid：渲染成图片嵌入，渲染失败才退回代码块
+      if (this.isMermaidBlock(el)) {
+        const maxWidth = this.getTableCellAvailableWidth(el) ?? this.pageContentWidthPx;
+        const imageRun = await this.createMermaidImageRun(this.takeMermaidSource(el), maxWidth);
+        if (imageRun) {
+          docxObjects.push(new Paragraph({
+            children: [imageRun],
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 200 }
+          }));
+          continue;
+        }
+      }
+
       let currentParagraphOptions: any = { ...paragraphStyles, font: mainFont };
 
       if (tagName.startsWith('H') && i > 0) {
@@ -1775,7 +1913,7 @@ export default class DocxExporterPlugin extends Plugin {
           break;
         case 'PRE':
           const codeElement = el.querySelector('code');
-          if (codeElement && this.isTocCodeBlock(codeElement)) {
+          if (codeElement && this.isCodeBlockWithLanguage(codeElement, 'table-of-contents', 'toc')) {
             // 目录插件未启用时，代码块不会被展开，这里自行生成可跳转的目录
             docxObjects.push(...this.buildTableOfContents(this.takeTocOptions(el.textContent ?? '')));
             break;
@@ -1844,6 +1982,18 @@ export default class DocxExporterPlugin extends Plugin {
           const listItems = await this.parseListElementForQuote(el as HTMLUListElement | HTMLOListElement, indentLevel, sourcePath);
           children.push(...listItems);
         } else if (tagName === 'PRE') {
+          if (this.isMermaidBlock(el)) {
+            const imageRun = await this.createMermaidImageRun(this.takeMermaidSource(el), this.pageContentWidthPx);
+            if (imageRun) {
+              children.push(new Paragraph({
+                children: [imageRun],
+                alignment: AlignmentType.CENTER,
+                spacing: { after: 100 },
+                font: mainFont
+              }));
+              continue;
+            }
+          }
           const codeBlock = await this.parsePreElementForQuote(el, indentLevel, sourcePath);
           if (codeBlock) {
             children.push(codeBlock);
@@ -2194,7 +2344,9 @@ export default class DocxExporterPlugin extends Plugin {
       // 先扫描全部标题并建立书签映射，保证目录链接（通常出现在标题之前）能正确指向
       this.collectHeadingBookmarks(tempDiv);
       // 从原始 Markdown 里取出目录代码块的选项
-      this.tocOptionQueue = this.parseTocBlocksFromMarkdown(markdownContent);
+      this.tocOptionQueue = this.parseFencedBlocksFromMarkdown(markdownContent, /^(table-of-contents|toc)$/i);
+      // mermaid 代码块源码：渲染后的 DOM 里可能只剩 SVG，源码只能从 Markdown 里取
+      this.mermaidSourceQueue = this.parseFencedBlocksFromMarkdown(markdownContent, /^mermaid$/i);
 
       // 重置图片计数器并显示开始导出提示
       this.totalNetworkImages = this.countNetworkImages(tempDiv);

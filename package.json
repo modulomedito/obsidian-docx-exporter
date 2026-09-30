@@ -23,6 +23,7 @@
     "docx": "^8.5.0",
     "esbuild": "^0.27.1",
     "jszip": "^3.10.1",
+    "mermaid": "^11.17.2",
     "obsidian": "latest",
     "typescript": "^5.5.3"
   }

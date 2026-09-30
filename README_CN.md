@@ -15,6 +15,7 @@ DOCX Exporter 是一个为 Obsidian 设计的插件，旨在帮助用户将笔�
 * **富文本导出**：支持导出包括标题、粗体、斜体、列表、超链接和代码块在内的多种 Markdown 格式。
 * **图片支持**：可导出笔记中的本地图片和网络图片，并自动处理图片格式和尺寸。
 * **SVG 图片支持**：桌面端会自动调用插件内置的 `rsvg-convert` 将 SVG（含外链、图床和相对路径引用的矢量图）栅格化为 PNG 后再嵌入，按 2 倍显示尺寸渲染以保证清晰度；移动端没有该工具时，仍按原始 SVG 嵌入。
+* **Mermaid 图表支持**：```mermaid 代码块会用插件内置的 Mermaid 渲染成图片后嵌入（居中显示、按页面宽度缩放、2 倍采样保证清晰），桌面端和移动端都可用；渲染失败时退回按代码块导出源码。
 * **兼容性**：生成的 DOCX 文件与 Microsoft Word 具有良好的兼容性。
 * **目录支持**：```table-of-contents 代码块（如 Automatic Table Of Contents 插件）会导出为可点击跳转的目录条目。插件会为每个标题自动加书签，因此目录和正文里的 `#标题` 内链在 Word 中都能正确跳转。
 
@@ -48,3 +49,6 @@ DOCX Exporter 是一个为 Obsidian 设计的插件，旨在帮助用户将笔�
 * **[librsvg (rsvg-convert)](https://gitlab.gnome.org/GNOME/librsvg)**
     * **许可证:** LGPL-2.1-or-later
     * **说明:** 随插件附带的 Windows 可执行文件，用于在导出前把 SVG 图片栅格化为 PNG（仅桌面端可用）。
+* **[Mermaid](https://github.com/mermaid-js/mermaid)**
+    * **许可证:** MIT
+    * **说明:** 随插件打包的图表库，用于把 ```mermaid 代码块渲染为 SVG，从而以图片形式嵌入 DOCX。
