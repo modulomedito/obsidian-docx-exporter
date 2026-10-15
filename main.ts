@@ -77,8 +77,12 @@ const locales = {
     "SVG_CONVERT_FAILED": "SVG conversion failed for: {0}, embedding the original file.",
     "MERMAID_RENDERING": "Rendering Mermaid diagram...",
     "MERMAID_RENDER_FAILED": "Mermaid diagram rendering failed, exporting it as a code block.",
-    "SETTINGS_HEADING_STYLES_TITLE": "Heading styles",
+    "SETTINGS_HEADING_STYLES_TITLE": "Styles",
     "SETTINGS_SIZE_PLACEHOLDER": "Size",
+    "SETTINGS_ROW_TEXT": "Text",
+    "SETTINGS_ROW_CODE": "Code",
+    "SETTINGS_ROW_TOC": "TOC",
+    "SETTINGS_COLOR_PLACEHOLDER": "Color",
     "SETTINGS_TOC_TITLE": "Table of contents",
     "SETTINGS_TOC_PAGE_NUMBER": "Exclude page number",
     "SETTINGS_TOC_PAGE_NUMBER_DESC": "On by default. Turn on to hide the right-aligned page number with dot leaders on each TOC entry."
@@ -115,8 +119,12 @@ const locales = {
     "SVG_CONVERT_FAILED": "SVG 转换失败：{0}，将嵌入原始文件。",
     "MERMAID_RENDERING": "正在渲染 Mermaid 图表...",
     "MERMAID_RENDER_FAILED": "Mermaid 图表渲染失败，将按代码块导出。",
-    "SETTINGS_HEADING_STYLES_TITLE": "标题样式",
+    "SETTINGS_HEADING_STYLES_TITLE": "样式",
     "SETTINGS_SIZE_PLACEHOLDER": "字号",
+    "SETTINGS_ROW_TEXT": "正文",
+    "SETTINGS_ROW_CODE": "代码",
+    "SETTINGS_ROW_TOC": "目录",
+    "SETTINGS_COLOR_PLACEHOLDER": "颜色",
     "SETTINGS_TOC_TITLE": "目录",
     "SETTINGS_TOC_PAGE_NUMBER": "排除页码",
     "SETTINGS_TOC_PAGE_NUMBER_DESC": "默认开启。勾选后隐藏每个目录条目右侧带前导点的右对齐页码。"
@@ -510,13 +518,27 @@ interface HeadingStyleConfig {
   alignment?: HeadingAlignment;
 }
 
+interface TocStyleConfig {
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;   // 目录条目默认带下划线，false 表示显式取消
+  size?: string;         // 字号（pt），空字符串表示继承默认
+  color?: string;        // 字体颜色（hex，如 0563C1 或 #0563C1），空表示默认蓝色
+}
+
 interface DocxExporterSettings {
   headingStyles: Record<HeadingKey, HeadingStyleConfig>;
+  textStyle: HeadingStyleConfig;   // 正文文本
+  codeStyle: HeadingStyleConfig;   // 代码（行内代码 + 代码块）
+  tocStyle: TocStyleConfig;        // 目录条目文本
   tocExcludePageNumber: boolean;
 }
 
 const DEFAULT_SETTINGS: DocxExporterSettings = {
   headingStyles: { h1: {}, h2: {}, h3: {}, h4: {}, h5: {}, h6: {} },
+  textStyle: {},
+  codeStyle: {},
+  tocStyle: {},
   tocExcludePageNumber: false
 };
 
@@ -550,53 +572,15 @@ class DocxExporterSettingTab extends PluginSettingTab {
     ];
 
     for (const { key, label } of headings) {
-      const cfg = this.plugin.settings.headingStyles[key];
-      // 用原生 DOM 构建整行控件，避免 Setting 链式控件在某些环境下渲染中断
-      const row = containerEl.createDiv({ cls: 'docx-heading-row' });
-      row.createEl('span', { text: label, cls: 'docx-heading-label' });
-
-      // B / I 切换按钮
-      const boldBtn = row.createEl('button', { text: 'B', cls: 'docx-style-toggle' });
-      boldBtn.classList.toggle('is-active', !!cfg.bold);
-      boldBtn.addEventListener('click', async () => {
-        cfg.bold = cfg.bold ? undefined : true;
-        boldBtn.classList.toggle('is-active', !!cfg.bold);
-        await this.plugin.saveSettings();
-      });
-      const italicBtn = row.createEl('button', { text: 'I', cls: 'docx-style-toggle docx-style-italic' });
-      italicBtn.classList.toggle('is-active', !!cfg.italic);
-      italicBtn.addEventListener('click', async () => {
-        cfg.italic = cfg.italic ? undefined : true;
-        italicBtn.classList.toggle('is-active', !!cfg.italic);
-        await this.plugin.saveSettings();
-      });
-
-      // 字号输入框（pt，留空继承默认）
-      const sizeInput = row.createEl('input', { cls: 'docx-style-size' });
-      sizeInput.type = 'text';
-      sizeInput.placeholder = this.i18n.t('SETTINGS_SIZE_PLACEHOLDER');
-      sizeInput.value = cfg.size ?? '';
-      sizeInput.addEventListener('change', async () => {
-        const v = sizeInput.value.trim();
-        cfg.size = v || undefined;
-        await this.plugin.saveSettings();
-      });
-
-      // 三个对齐图标按钮（左/中/右，再次点击取消即继承默认）
-      for (const value of ['left', 'center', 'right'] as HeadingAlignment[]) {
-        const btn = row.createEl('button', { cls: 'docx-style-toggle docx-align-toggle' });
-        setIcon(btn, value === 'left' ? 'align-left' : value === 'center' ? 'align-center' : 'align-right');
-        btn.setAttribute('data-align', value);
-        btn.classList.toggle('is-active', cfg.alignment === value);
-        btn.addEventListener('click', async () => {
-          cfg.alignment = cfg.alignment === value ? undefined : value;
-          row.querySelectorAll('.docx-align-toggle').forEach(el => {
-            el.classList.toggle('is-active', el.getAttribute('data-align') === cfg.alignment);
-          });
-          await this.plugin.saveSettings();
-        });
-      }
+      this.buildStyleRow(containerEl, label, this.plugin.settings.headingStyles[key]);
     }
+
+    // 正文与代码：在 H1~H6 之后追加
+    this.buildStyleRow(containerEl, this.i18n.t('SETTINGS_ROW_TEXT'), this.plugin.settings.textStyle);
+    this.buildStyleRow(containerEl, this.i18n.t('SETTINGS_ROW_CODE'), this.plugin.settings.codeStyle);
+
+    // 目录条目文本样式：B / I / U + 字号 + 字体颜色
+    this.buildTocStyleRow(containerEl, this.i18n.t('SETTINGS_ROW_TOC'), this.plugin.settings.tocStyle);
 
     containerEl.createEl('h2', { text: this.i18n.t('SETTINGS_TOC_TITLE') });
     new Setting(containerEl)
@@ -609,6 +593,124 @@ class DocxExporterSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
       });
+  }
+
+  // 一行样式配置：标签 + B/I 切换 + 字号输入 + 左/中/右对齐（再次点击取消即继承默认）
+  private buildStyleRow(containerEl: HTMLElement, label: string, cfg: HeadingStyleConfig): void {
+    // 用原生 DOM 构建整行控件，避免 Setting 链式控件在某些环境下渲染中断
+    const row = containerEl.createDiv({ cls: 'docx-heading-row' });
+    row.createEl('span', { text: label, cls: 'docx-heading-label' });
+
+    const boldBtn = row.createEl('button', { text: 'B', cls: 'docx-style-toggle' });
+    boldBtn.classList.toggle('is-active', !!cfg.bold);
+    boldBtn.addEventListener('click', async () => {
+      cfg.bold = cfg.bold ? undefined : true;
+      boldBtn.classList.toggle('is-active', !!cfg.bold);
+      await this.plugin.saveSettings();
+    });
+    const italicBtn = row.createEl('button', { text: 'I', cls: 'docx-style-toggle docx-style-italic' });
+    italicBtn.classList.toggle('is-active', !!cfg.italic);
+    italicBtn.addEventListener('click', async () => {
+      cfg.italic = cfg.italic ? undefined : true;
+      italicBtn.classList.toggle('is-active', !!cfg.italic);
+      await this.plugin.saveSettings();
+    });
+
+    const sizeInput = row.createEl('input', { cls: 'docx-style-size' });
+    sizeInput.type = 'text';
+    sizeInput.placeholder = this.i18n.t('SETTINGS_SIZE_PLACEHOLDER');
+    sizeInput.value = cfg.size ?? '';
+    sizeInput.addEventListener('change', async () => {
+      const v = sizeInput.value.trim();
+      cfg.size = v || undefined;
+      await this.plugin.saveSettings();
+    });
+
+    for (const value of ['left', 'center', 'right'] as HeadingAlignment[]) {
+      const btn = row.createEl('button', { cls: 'docx-style-toggle docx-align-toggle' });
+      setIcon(btn, value === 'left' ? 'align-left' : value === 'center' ? 'align-center' : 'align-right');
+      btn.setAttribute('data-align', value);
+      btn.classList.toggle('is-active', cfg.alignment === value);
+      btn.addEventListener('click', async () => {
+        cfg.alignment = cfg.alignment === value ? undefined : value;
+        row.querySelectorAll('.docx-align-toggle').forEach(el => {
+          el.classList.toggle('is-active', el.getAttribute('data-align') === cfg.alignment);
+        });
+        await this.plugin.saveSettings();
+      });
+    }
+  }
+
+  // 目录条目样式行：B / I / U + 字号 + 字体颜色（颜色用原生取色器 + hex 输入框）
+  private buildTocStyleRow(containerEl: HTMLElement, label: string, cfg: TocStyleConfig): void {
+    const row = containerEl.createDiv({ cls: 'docx-heading-row' });
+    row.createEl('span', { text: label, cls: 'docx-heading-label' });
+
+    const boldBtn = row.createEl('button', { text: 'B', cls: 'docx-style-toggle' });
+    boldBtn.classList.toggle('is-active', !!cfg.bold);
+    boldBtn.addEventListener('click', async () => {
+      cfg.bold = cfg.bold ? undefined : true;
+      boldBtn.classList.toggle('is-active', !!cfg.bold);
+      await this.plugin.saveSettings();
+    });
+
+    const italicBtn = row.createEl('button', { text: 'I', cls: 'docx-style-toggle docx-style-italic' });
+    italicBtn.classList.toggle('is-active', !!cfg.italic);
+    italicBtn.addEventListener('click', async () => {
+      cfg.italic = cfg.italic ? undefined : true;
+      italicBtn.classList.toggle('is-active', !!cfg.italic);
+      await this.plugin.saveSettings();
+    });
+
+    // 目录条目默认带下划线，因此这里默认高亮；点击一次即显式取消下划线
+    const underlineBtn = row.createEl('button', { text: 'U', cls: 'docx-style-toggle docx-style-underline' });
+    underlineBtn.classList.toggle('is-active', cfg.underline !== false);
+    underlineBtn.addEventListener('click', async () => {
+      cfg.underline = cfg.underline === false;
+      underlineBtn.classList.toggle('is-active', cfg.underline !== false);
+      await this.plugin.saveSettings();
+    });
+
+    const sizeInput = row.createEl('input', { cls: 'docx-style-size' });
+    sizeInput.type = 'text';
+    sizeInput.placeholder = this.i18n.t('SETTINGS_SIZE_PLACEHOLDER');
+    sizeInput.value = cfg.size ?? '';
+    sizeInput.addEventListener('change', async () => {
+      const v = sizeInput.value.trim();
+      cfg.size = v || undefined;
+      await this.plugin.saveSettings();
+    });
+
+    const applyColor = async (hex: string | undefined) => {
+      cfg.color = hex;
+      await this.plugin.saveSettings();
+    };
+    const colorInput = row.createEl('input', { cls: 'docx-style-color' });
+    colorInput.type = 'color';
+    colorInput.value = '#' + this.normalizeHexColor(cfg.color) || '#0563C1';
+    colorInput.addEventListener('change', async () => {
+      colorInput.value = this.normalizeHexColor(colorInput.value);
+      await applyColor(colorInput.value);
+    });
+
+    const colorText = row.createEl('input', { cls: 'docx-style-color-text' });
+    colorText.type = 'text';
+    colorText.placeholder = this.i18n.t('SETTINGS_COLOR_PLACEHOLDER');
+    colorText.value = cfg.color ?? '';
+    colorText.addEventListener('change', async () => {
+      const v = colorText.value.trim();
+      if (!v) {
+        colorText.value = '';
+        colorInput.value = '#0563C1';
+        await applyColor(undefined);
+        return;
+      }
+      const hex = this.normalizeHexColor(v);
+      if (!/^[0-9A-Fa-f]{6}$/.test(hex)) return; // 非法输入直接忽略，保留原值
+      colorText.value = hex;
+      colorInput.value = '#' + hex;
+      await applyColor(hex);
+    });
   }
 
 }
@@ -691,6 +793,9 @@ export default class DocxExporterPlugin extends Plugin {
       if (!this.settings.headingStyles) this.settings.headingStyles = {} as any;
       if (!this.settings.headingStyles[key]) this.settings.headingStyles[key] = {};
     }
+    if (!this.settings.textStyle) this.settings.textStyle = {};
+    if (!this.settings.codeStyle) this.settings.codeStyle = {};
+    if (!this.settings.tocStyle) this.settings.tocStyle = {};
   }
 
   async saveSettings() {
@@ -848,9 +953,25 @@ export default class DocxExporterPlugin extends Plugin {
     return looseKey ? this.headingBookmarksLoose.get(looseKey) ?? null : null;
   }
 
-  // 目录条目文本样式
+  // 归一化 hex 颜色：去掉 #、大写；无值时回退目录默认蓝
+  private normalizeHexColor(color: string | undefined, fallback: string = '0563C1'): string {
+    const raw = (color ?? '').trim().replace(/^#/, '');
+    return /^[0-9A-Fa-f]{6}$/.test(raw) ? raw.toUpperCase() : fallback;
+  }
+
+  // 目录条目文本样式（B/I/U/字号/颜色 可配置）
   private tocLinkTextRun(text: string): TextRun {
-    return new TextRun({ text, style: "Hyperlink", color: '0563C1', underline: {} });
+    const cfg = this.settings?.tocStyle;
+    const size = cfg?.size ? parseFloat(cfg.size) : NaN;
+    return new TextRun({
+      text,
+      style: "Hyperlink",
+      color: this.normalizeHexColor(cfg?.color),
+      underline: cfg?.underline === false ? undefined : {},
+      bold: cfg?.bold,
+      italics: cfg?.italic,
+      size: !isNaN(size) && size > 0 ? Math.round(size * 2) : undefined
+    });
   }
 
   // 代码块语言匹配（可能是 pre>code，也可能是已渲染的容器）
@@ -1387,19 +1508,27 @@ export default class DocxExporterPlugin extends Plugin {
   }
 
   // 解析代码高亮
-  private parseSyntaxHighlightedCode(codeElement: HTMLElement, defaultFont: any, defaultSize: number): TextRun[] {
+  private parseSyntaxHighlightedCode(codeElement: HTMLElement, defaultFont: any, defaultSize: number, runStyle?: { bold?: boolean; italics?: boolean }): TextRun[] {
     const runs: TextRun[] = [];
     const codeFont = CODE_FONT;
+    const textOptions = (seg: string, color: string) => ({
+      text: seg,
+      font: codeFont,
+      color,
+      size: defaultSize,
+      bold: runStyle?.bold,
+      italics: runStyle?.italics
+    });
     Array.from(codeElement.childNodes).forEach(node => {
       if (node.nodeType === Node.TEXT_NODE && node.textContent) {
         node.textContent.split('\n').forEach((seg, idx, arr) => {
-          if (seg) runs.push(new TextRun({ text: seg, font: codeFont, color: this.rgbToHex(window.getComputedStyle(codeElement).color), size: defaultSize }));
+          if (seg) runs.push(new TextRun(textOptions(seg, this.rgbToHex(window.getComputedStyle(codeElement).color))));
           if (idx < arr.length - 1) runs.push(new TextRun({ break: 1 }));
         });
       } else if (node.nodeType === Node.ELEMENT_NODE) {
         const el = node as HTMLElement;
         el.textContent?.split('\n').forEach((seg, idx, arr) => {
-          if (seg) runs.push(new TextRun({ text: seg, font: codeFont, color: this.rgbToHex(window.getComputedStyle(el).color), size: defaultSize }));
+          if (seg) runs.push(new TextRun(textOptions(seg, this.rgbToHex(window.getComputedStyle(el).color))));
           if (idx < arr.length - 1) runs.push(new TextRun({ break: 1 }));
         });
       }
@@ -1651,15 +1780,18 @@ export default class DocxExporterPlugin extends Plugin {
       } else if (child.nodeType === Node.ELEMENT_NODE) {
         const el = child as HTMLElement;
         const style = window.getComputedStyle(el);
-        // 行内代码特殊处理
+        // 行内代码特殊处理（代码样式配置在这里合并）
         if (el.tagName.toUpperCase() === 'CODE') {
+          const codeStyle = this.codeRunStyle();
           runs.push(new TextRun({
             text: el.textContent ?? '',
             style: "SourceCode",
             shading: { type: ShadingType.CLEAR, fill: this.rgbToHex(style.backgroundColor) || 'D3D3D3', color: "auto" },
             font: codeFont,
             color: this.rgbToHex(style.color),
-            size: this.pxToHalfPoints(style.fontSize)
+            size: codeStyle?.size ?? this.pxToHalfPoints(style.fontSize),
+            bold: codeStyle?.bold,
+            italics: codeStyle?.italics
           }));
           continue;
         }
@@ -1953,17 +2085,19 @@ export default class DocxExporterPlugin extends Plugin {
 
   // 标题段落级对齐（对齐不是 run 属性，段落级设置可盖过内置标题样式）
   private applyHeadingConfig(opts: any, level: number): void {
-    const cfg = this.settings?.headingStyles?.[('h' + level) as HeadingKey];
-    if (cfg?.alignment) {
-      opts.alignment = cfg.alignment === 'left' ? AlignmentType.LEFT
-        : cfg.alignment === 'center' ? AlignmentType.CENTER
-          : AlignmentType.RIGHT;
-    }
+    this.applyAlignmentConfig(opts, this.settings?.headingStyles?.[('h' + level) as HeadingKey]);
   }
 
-  // 取标题的 run 级覆盖（加粗/斜体/字号），用于构造 TextRun 时盖过内置标题样式
-  private headingRunStyle(level: number): { bold?: boolean; italics?: boolean; size?: number } | undefined {
-    const cfg = this.settings?.headingStyles?.[('h' + level) as HeadingKey];
+  // 段落级对齐（left/center/right），未配置则不动
+  private applyAlignmentConfig(opts: any, cfg: HeadingStyleConfig | undefined): void {
+    if (!cfg?.alignment) return;
+    opts.alignment = cfg.alignment === 'left' ? AlignmentType.LEFT
+      : cfg.alignment === 'center' ? AlignmentType.CENTER
+        : AlignmentType.RIGHT;
+  }
+
+  // 把配置转成 run 级覆盖（字号转半磅）；必须在 TextRun 构造时合并，才能盖过样式默认值
+  private styleRunOverrides(cfg: HeadingStyleConfig | undefined): { bold?: boolean; italics?: boolean; size?: number } | undefined {
     if (!cfg) return undefined;
     let size: number | undefined;
     if (cfg.size) {
@@ -1972,6 +2106,21 @@ export default class DocxExporterPlugin extends Plugin {
     }
     if (!cfg.bold && !cfg.italic && size === undefined) return undefined;
     return { bold: cfg.bold, italics: cfg.italic, size };
+  }
+
+  // 取标题的 run 级覆盖（加粗/斜体/字号），用于构造 TextRun 时盖过内置标题样式
+  private headingRunStyle(level: number): { bold?: boolean; italics?: boolean; size?: number } | undefined {
+    return this.styleRunOverrides(this.settings?.headingStyles?.[('h' + level) as HeadingKey]);
+  }
+
+  // 正文文本的 run 级覆盖
+  private textRunStyle(): { bold?: boolean; italics?: boolean; size?: number } | undefined {
+    return this.styleRunOverrides(this.settings?.textStyle);
+  }
+
+  // 代码（行内代码 + 代码块）的 run 级覆盖
+  private codeRunStyle(): { bold?: boolean; italics?: boolean; size?: number } | undefined {
+    return this.styleRunOverrides(this.settings?.codeStyle);
   }
 
   private async htmlToDocxObjects(
@@ -1995,8 +2144,10 @@ export default class DocxExporterPlugin extends Plugin {
 
     // 如果没有子元素或只有空文本，则直接返回一个空段落
     if (!children.some(c => c.nodeType === Node.ELEMENT_NODE) && element.textContent?.trim()) {
-      const inlineChildren = await this.parseInlineElements(element, sourcePath);
-      if (inlineChildren.length > 0) { return [new Paragraph({ children: inlineChildren, font: mainFont, spacing: { line: 240 } })]; }
+      const inlineChildren = await this.parseInlineElements(element, sourcePath, this.textRunStyle());
+      const inlineOptions: any = { children: inlineChildren, font: mainFont, spacing: { line: 240 } };
+      this.applyAlignmentConfig(inlineOptions, this.settings?.textStyle);
+      if (inlineChildren.length > 0) { return [new Paragraph(inlineOptions)]; }
       return [];
     }
 
@@ -2081,7 +2232,9 @@ export default class DocxExporterPlugin extends Plugin {
           if (el.textContent?.trim() || el.querySelector('img')) {
             // 行距 240 = 单倍行距（w:lineRule 默认 auto）
             currentParagraphOptions.spacing = { after: 200, line: 240 };
-            const pChildren = await this.parseInlineElements(el, sourcePath);
+            // 正文样式配置：对齐走段落级，加粗/斜体/字号走 run 级
+            this.applyAlignmentConfig(currentParagraphOptions, this.settings?.textStyle);
+            const pChildren = await this.parseInlineElements(el, sourcePath, this.textRunStyle());
             if (pChildren.length > 0) { docxObjects.push(new Paragraph({ ...currentParagraphOptions, children: pChildren })); }
           }
           break;
@@ -2121,18 +2274,22 @@ export default class DocxExporterPlugin extends Plugin {
             currentParagraphOptions.spacing = {};
             currentParagraphOptions.font = codeFont;
             currentParagraphOptions.shading = { type: ShadingType.CLEAR, fill: 'D3D3D3', color: "auto" };
+            // 代码样式配置：对齐走段落级，字号/加粗/斜体走 run 级
+            const codeCfg = this.settings?.codeStyle;
+            this.applyAlignmentConfig(currentParagraphOptions, codeCfg);
+            const codeOverrides = this.codeRunStyle();
             const preStyle = window.getComputedStyle(el);
             const codeStyle = window.getComputedStyle(codeElement);
             const langMatch = Array.from(codeElement.classList).find(cls => cls.startsWith('language-'));
             const lang = langMatch ? langMatch.substring('language-'.length) : null;
-            const size = this.pxToHalfPoints(codeStyle.fontSize);
+            const size = codeOverrides?.size ?? this.pxToHalfPoints(codeStyle.fontSize);
 
             const runs: TextRun[] = [];
             if (lang) {
               runs.push(new TextRun({ text: lang, italics: true, color: "888880", size: (size || 22) - 2 }));
               runs.push(new TextRun({ break: 2 }));
             }
-            runs.push(...this.parseSyntaxHighlightedCode(codeElement, codeFont, size));
+            runs.push(...this.parseSyntaxHighlightedCode(codeElement, codeFont, size, codeOverrides));
             docxObjects.push(new Paragraph({ ...currentParagraphOptions, children: runs }));
           }
           break;
@@ -2337,7 +2494,8 @@ export default class DocxExporterPlugin extends Plugin {
     const codeStyle = window.getComputedStyle(codeElement);
     const preBgColor = this.rgbToHex(preStyle.backgroundColor) || 'F0F0F0';
     const codeFont = CODE_FONT;
-    const size = this.pxToHalfPoints(codeStyle.fontSize);
+    const codeOverrides = this.codeRunStyle();
+    const size = codeOverrides?.size ?? this.pxToHalfPoints(codeStyle.fontSize);
 
     const runs: TextRun[] = [];
     const langMatch = Array.from(codeElement.classList).find(cls => cls.startsWith('language-'));
@@ -2346,15 +2504,16 @@ export default class DocxExporterPlugin extends Plugin {
       runs.push(new TextRun({ text: lang, italics: true, color: "888880", size: (size || 22) - 2 }));
       runs.push(new TextRun({ break: 2 }));
     }
-    runs.push(...this.parseSyntaxHighlightedCode(codeElement, codeFont, size));
+    runs.push(...this.parseSyntaxHighlightedCode(codeElement, codeFont, size, codeOverrides));
 
-    const paragraphOptions = {
+    const paragraphOptions: any = {
       style: "SourceCode",
       spacing: { after: 100 },
       indent: { left: 200 * (indentLevel + 1) },
       shading: { type: ShadingType.CLEAR, fill: preBgColor, color: "auto" },
       font: codeFont
     };
+    this.applyAlignmentConfig(paragraphOptions, this.settings?.codeStyle);
 
     return new Paragraph({ ...paragraphOptions, children: runs });
   }

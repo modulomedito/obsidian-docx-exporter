@@ -61,3 +61,18 @@
 .docx-style-size {
     width: 64px;
 }
+.docx-style-underline {
+    text-decoration: underline;
+}
+.docx-style-color {
+    width: 32px;
+    height: 30px;
+    padding: 2px;
+    background: none;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    cursor: pointer;
+}
+.docx-style-color-text {
+    width: 84px;
+}
