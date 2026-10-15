@@ -37,7 +37,7 @@ import {
   TabStopType,
   LeaderType,
   Tab,
-  PageReference
+  SimpleField
 } from 'docx';
 import * as JSZip from 'jszip';
 
@@ -1039,18 +1039,24 @@ export default class DocxExporterPlugin extends Plugin {
     const includePageNumber = !this.settings?.tocExcludePageNumber;
     for (const entry of entries) {
       const indentLevel = Math.max(0, entry.level - baseLevel);
-      const children: (InlineRun | PageReference)[] = [new InternalHyperlink({
+      const children: (InlineRun | SimpleField)[] = [new InternalHyperlink({
         anchor: entry.bookmark,
         children: [this.tocLinkTextRun(entry.text)]
       })];
       if (includePageNumber) {
-        // 制表符 + PAGEREF 域：指向标题书签，取标题所在页的真实页码（dirty 域，Word 打开时自动刷新）
+        // 制表符 + fldSimple PAGEREF 域（带缓存值）：
+        // Word/WPS 打开时按 dirty 标记自动重算真实页码；OnlyOffice 等不支持计算域的查看器直接显示缓存值
         children.push(new TextRun({ children: [new Tab()], font: mainFont }));
-        children.push(new PageReference(entry.bookmark, { hyperlink: true }));
+        children.push(new SimpleField(`PAGEREF ${entry.bookmark} \\h`, '-'));
       }
       paragraphs.push(new Paragraph({
         children,
-        indent: { left: 360 * indentLevel },
+        // DocxTocEntry 样式仅作为后处理标记：用它定位目录条目段落，
+        // 以便把整个目录包进真实的 TOC 域（Word 打开时分页完成后重算页码）
+        style: 'DocxTocEntry',
+        // 用首行缩进而非左缩进：OnlyOffice 等查看器把制表位按左缩进偏移，
+        // 左缩进会把右对齐页码推出页面边界；首行缩进不改变制表位基准
+        indent: { firstLine: 360 * indentLevel },
         spacing: { after: 60 },
         font: mainFont,
         tabStops: includePageNumber
@@ -2418,6 +2424,92 @@ export default class DocxExporterPlugin extends Plugin {
     zip.file(docPath, xml);
   }
 
+  // 把目录页码的 fldSimple 域转换为 Word 原生 TOC 使用的复杂域结构：
+  // begin(dirty) + instrText + separate + 缓存值 + end
+  // Word 2016 对 fldSimple 的 dirty 支持不可靠（打开时页码会全变成 1），
+  // 复杂域则会在打开时正确重算；OnlyOffice/WPS 等不计算域的查看器显示 separate 后的缓存值。
+  private async fixPageRefDirtyInZip(zip: JSZip): Promise<void> {
+    const docPath = 'word/document.xml';
+    const docFile = zip.file(docPath);
+    if (!docFile) return;
+
+    let xml = await docFile.async('string');
+    if (!xml.includes('PAGEREF')) return;
+
+    xml = xml.replace(/<w:fldSimple w:instr="([^"]*PAGEREF[^"]*)">([\s\S]*?)<\/w:fldSimple>/g,
+      (_match, instr: string, cached: string) =>
+        '<w:r><w:fldChar w:fldCharType="begin" w:dirty="true"/></w:r>' +
+        `<w:r><w:instrText xml:space="preserve"> ${instr} </w:instrText></w:r>` +
+        '<w:r><w:fldChar w:fldCharType="separate"/></w:r>' +
+        cached +
+        '<w:r><w:fldChar w:fldCharType="end"/></w:r>');
+    zip.file(docPath, xml);
+  }
+
+  // 把目录条目包进真实的 TOC 域：
+  // Word 打开文档时（updateFields/dirty）重算 TOC 域会先完成分页再填页码，因此页码正确；
+  // 直接给 PAGEREF 域加 dirty 则是在分页前计算，Word 2016 里所有页码都会变成 1。
+  // OnlyOffice/WPS 等不重算域的查看器仍显示我们生成的缓存条目。
+  private async fixTocFieldInZip(zip: JSZip): Promise<void> {
+    const docPath = 'word/document.xml';
+    const docFile = zip.file(docPath);
+    if (!docFile) return;
+
+    let xml = await docFile.async('string');
+    if (!xml.includes('DocxTocEntry')) return;
+
+    const tocParas = (xml.match(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g) || [])
+      .filter(p => p.includes('DocxTocEntry'));
+    if (tocParas.length === 0) return;
+
+    const first = tocParas[0];
+    const last = tocParas[tocParas.length - 1];
+    // \o "1-6" 内置标题样式 1-6 级；\h 超链接；\z \u 标准开关；\n 不显示页码
+    const includePageNumber = !this.settings?.tocExcludePageNumber;
+    const instr = includePageNumber
+      ? ' TOC \\o "1-6" \\h \\z \\u '
+      : ' TOC \\o "1-6" \\h \\z \\u \\n ';
+    const fieldStart =
+      '<w:r><w:fldChar w:fldCharType="begin" w:dirty="true"/></w:r>' +
+      `<w:r><w:instrText xml:space="preserve">${instr}</w:instrText></w:r>` +
+      '<w:r><w:fldChar w:fldCharType="separate"/></w:r>';
+    const fieldEnd = '<w:r><w:fldChar w:fldCharType="end"/></w:r>';
+
+    const firstNew = first.includes('</w:pPr>')
+      ? first.replace('</w:pPr>', `</w:pPr>${fieldStart}`)
+      : first.replace(/(<w:p\b[^>]*>)/, `$1${fieldStart}`);
+    const lastNew = last.replace(/<\/w:p>$/, `${fieldEnd}</w:p>`);
+
+    const firstIdx = xml.indexOf(first);
+    const lastIdx = xml.lastIndexOf(last);
+    if (firstIdx < 0 || lastIdx < 0 || firstIdx > lastIdx) return;
+
+    xml = xml.slice(0, firstIdx)
+      + firstNew
+      + xml.slice(firstIdx + first.length, lastIdx)
+      + lastNew
+      + xml.slice(lastIdx + last.length);
+    zip.file(docPath, xml);
+  }
+
+  // 在 settings.xml 里声明打开时更新域（Word 原生 TOC 的标准做法）。
+  // updateFields 在 CT_Settings 里必须排在 compat/footnotePr 之前，否则 Word 会忽略。
+  private async fixSettingsUpdateFieldsInZip(zip: JSZip): Promise<void> {
+    const path = 'word/settings.xml';
+    const file = zip.file(path);
+    if (!file) return;
+
+    let xml = await file.async('string');
+    if (xml.includes('w:updateFields')) return;
+    const tag = '<w:updateFields w:val="true"/>';
+    // 按 schema 顺序插到 compat / footnotePr / docVars / rsids 等元素之前
+    const anchor = xml.match(/<w:(hdrShapeDefaults|footnotePr|endnotePr|compat|docVars|rsids)\b/);
+    xml = anchor
+      ? xml.replace(anchor[0], `${tag}${anchor[0]}`)
+      : xml.replace(/(<w:settings\b[^>]*>)/, `$1${tag}`);
+    zip.file(path, xml);
+  }
+
   private async fixDocxBlobAuto(blob: Blob): Promise<Blob> {
     const zip = await JSZip.loadAsync(blob);
 
@@ -2427,9 +2519,17 @@ export default class DocxExporterPlugin extends Plugin {
     // 修正表格列宽（固定布局依赖 tblGrid）
     await this.fixTableGridInZip(zip);
 
+    // 目录页码域标记为 dirty（Word 打开时自动刷新页码）
+    await this.fixPageRefDirtyInZip(zip);
+
+    // 包裹 TOC 域 + 打开时更新域（Word 分页后重算，页码才正确）
+    await this.fixTocFieldInZip(zip);
+    await this.fixSettingsUpdateFieldsInZip(zip);
+
     const mediaEntries = Object.keys(zip.files).filter(name => name.startsWith('word/media/') && !name.endsWith('/'));
     if (mediaEntries.length === 0) {
-      return blob;
+      // 无图片也要回写 zip（前面的书签/表格/域修正依赖它）
+      return zip.generateAsync({ type: 'blob' });
     }
 
     let counter = 0;
