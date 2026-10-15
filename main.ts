@@ -83,6 +83,7 @@ const locales = {
     "SETTINGS_ROW_CODE": "Code",
     "SETTINGS_ROW_TOC": "TOC",
     "SETTINGS_COLOR_PLACEHOLDER": "Color",
+    "SETTINGS_FONT_DEFAULT": "Default (inherit)",
     "SETTINGS_TOC_TITLE": "Table of contents",
     "SETTINGS_TOC_PAGE_NUMBER": "Exclude page number",
     "SETTINGS_TOC_PAGE_NUMBER_DESC": "On by default. Turn on to hide the right-aligned page number with dot leaders on each TOC entry."
@@ -125,6 +126,7 @@ const locales = {
     "SETTINGS_ROW_CODE": "代码",
     "SETTINGS_ROW_TOC": "目录",
     "SETTINGS_COLOR_PLACEHOLDER": "颜色",
+    "SETTINGS_FONT_DEFAULT": "默认（继承）",
     "SETTINGS_TOC_TITLE": "目录",
     "SETTINGS_TOC_PAGE_NUMBER": "排除页码",
     "SETTINGS_TOC_PAGE_NUMBER_DESC": "默认开启。勾选后隐藏每个目录条目右侧带前导点的右对齐页码。"
@@ -515,6 +517,7 @@ interface HeadingStyleConfig {
   bold?: boolean;
   italic?: boolean;
   size?: string;       // 字号（pt），空字符串表示继承默认
+  font?: string;       // 字体族，空字符串表示继承默认
   alignment?: HeadingAlignment;
 }
 
@@ -523,6 +526,7 @@ interface TocStyleConfig {
   italic?: boolean;
   underline?: boolean;   // 目录条目默认带下划线，false 表示显式取消
   size?: string;         // 字号（pt），空字符串表示继承默认
+  font?: string;         // 字体族，空字符串表示继承默认
   color?: string;        // 字体颜色（hex，如 0563C1 或 #0563C1），空表示默认蓝色
 }
 
@@ -549,6 +553,20 @@ const TOC_RIGHT_TAB_POSITION = 9026;
 // 中文会挤在一起、标点被压缩，排版和 Obsidian 预览差别明显。
 const MAIN_FONT = { ascii: 'Times New Roman', hAnsi: 'Times New Roman', eastAsia: '宋体', hint: 'eastAsia' } as const;
 const CODE_FONT = { ascii: 'Courier New', hAnsi: 'Courier New', eastAsia: '宋体', hint: 'eastAsia' } as const;
+
+// 设置页可选字体族（中英文常用，标签即字体名）
+const FONT_FAMILY_OPTIONS = [
+  'Times New Roman', 'Arial', 'Calibri', 'Cambria', 'Georgia', 'Courier New', 'Consolas',
+  '微软雅黑', '宋体', '黑体', '楷体', '仿宋', '等线'
+];
+
+// run 级覆盖项：加粗/斜体/字号/字体族
+type StyleOverrides = { bold?: boolean; italics?: boolean; size?: number; font?: string };
+
+// 字体族覆盖：中西文统一使用所选字体
+function fontOverride(name: string | undefined) {
+  return name ? { ascii: name, hAnsi: name, eastAsia: name, cs: name, hint: 'eastAsia' } : undefined;
+}
 
 class DocxExporterSettingTab extends PluginSettingTab {
   plugin: DocxExporterPlugin;
@@ -639,6 +657,27 @@ class DocxExporterSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       });
     }
+
+    this.buildFontSelect(row, cfg);
+  }
+
+  // 行末的字体族下拉框：第一项为“默认（继承）”，未选择时不改字体
+  private buildFontSelect(row: HTMLElement, cfg: { font?: string }): void {
+    const select = row.createEl('select', { cls: 'docx-style-font' });
+    const defaultOption = select.createEl('option', { text: this.i18n.t('SETTINGS_FONT_DEFAULT'), value: '' });
+    defaultOption.selected = !cfg.font;
+    for (const family of FONT_FAMILY_OPTIONS) {
+      const option = select.createEl('option', { text: family, value: family });
+      if (cfg.font === family) option.selected = true;
+    }
+    // 兼容旧数据里存了不在列表中的字体名
+    if (cfg.font && !FONT_FAMILY_OPTIONS.includes(cfg.font)) {
+      select.createEl('option', { text: cfg.font, value: cfg.font }).selected = true;
+    }
+    select.addEventListener('change', async () => {
+      cfg.font = select.value || undefined;
+      await this.plugin.saveSettings();
+    });
   }
 
   // 目录条目样式行：B / I / U + 字号 + 字体颜色（颜色用原生取色器 + hex 输入框）
@@ -711,6 +750,8 @@ class DocxExporterSettingTab extends PluginSettingTab {
       colorInput.value = '#' + hex;
       await applyColor(hex);
     });
+
+    this.buildFontSelect(row, cfg);
   }
 
 }
@@ -970,7 +1011,8 @@ export default class DocxExporterPlugin extends Plugin {
       underline: cfg?.underline === false ? undefined : {},
       bold: cfg?.bold,
       italics: cfg?.italic,
-      size: !isNaN(size) && size > 0 ? Math.round(size * 2) : undefined
+      size: !isNaN(size) && size > 0 ? Math.round(size * 2) : undefined,
+      font: cfg?.font ? fontOverride(cfg.font) : undefined
     });
   }
 
@@ -1508,9 +1550,9 @@ export default class DocxExporterPlugin extends Plugin {
   }
 
   // 解析代码高亮
-  private parseSyntaxHighlightedCode(codeElement: HTMLElement, defaultFont: any, defaultSize: number, runStyle?: { bold?: boolean; italics?: boolean }): TextRun[] {
+  private parseSyntaxHighlightedCode(codeElement: HTMLElement, defaultFont: any, defaultSize: number, runStyle?: StyleOverrides): TextRun[] {
     const runs: TextRun[] = [];
-    const codeFont = CODE_FONT;
+    const codeFont = runStyle?.font ? fontOverride(runStyle.font) : CODE_FONT;
     const textOptions = (seg: string, color: string) => ({
       text: seg,
       font: codeFont,
@@ -1753,16 +1795,17 @@ export default class DocxExporterPlugin extends Plugin {
   }
 
   // 解析行内元素（支持超链接、加粗、斜体、代码、图片等）
-  private async parseInlineElements(element: HTMLElement, sourcePath: string, runStyle?: { bold?: boolean; italics?: boolean; size?: number }): Promise<InlineRun[]> {
+  private async parseInlineElements(element: HTMLElement, sourcePath: string, runStyle?: StyleOverrides): Promise<InlineRun[]> {
     const runs: InlineRun[] = [];
     const mainFont = MAIN_FONT;
     const codeFont = CODE_FONT;
-    // 标题样式覆盖（加粗/斜体/字号）：在 TextRun 构造时合并，才能盖过内置标题样式的默认值
+    // 样式覆盖（加粗/斜体/字号/字体）：在 TextRun 构造时合并，才能盖过内置标题样式的默认值
     const styleRun = (opts: any) => new TextRun({
       ...opts,
       bold: runStyle?.bold ?? opts.bold,
       italics: runStyle?.italics ?? opts.italics,
       size: runStyle?.size !== undefined ? runStyle.size : opts.size,
+      font: runStyle?.font ? fontOverride(runStyle.font) : opts.font,
     });
     for (const child of Array.from(element.childNodes)) {
       if (child.nodeType === Node.TEXT_NODE) {
@@ -1787,7 +1830,7 @@ export default class DocxExporterPlugin extends Plugin {
             text: el.textContent ?? '',
             style: "SourceCode",
             shading: { type: ShadingType.CLEAR, fill: this.rgbToHex(style.backgroundColor) || 'D3D3D3', color: "auto" },
-            font: codeFont,
+            font: codeStyle?.font ? fontOverride(codeStyle.font) : codeFont,
             color: this.rgbToHex(style.color),
             size: codeStyle?.size ?? this.pxToHalfPoints(style.fontSize),
             bold: codeStyle?.bold,
@@ -2097,29 +2140,30 @@ export default class DocxExporterPlugin extends Plugin {
   }
 
   // 把配置转成 run 级覆盖（字号转半磅）；必须在 TextRun 构造时合并，才能盖过样式默认值
-  private styleRunOverrides(cfg: HeadingStyleConfig | undefined): { bold?: boolean; italics?: boolean; size?: number } | undefined {
+  private styleRunOverrides(cfg: HeadingStyleConfig | undefined): StyleOverrides | undefined {
     if (!cfg) return undefined;
     let size: number | undefined;
     if (cfg.size) {
       const pt = parseFloat(cfg.size);
       if (!isNaN(pt) && pt > 0) size = Math.round(pt * 2); // docx 字号单位为半磅
     }
-    if (!cfg.bold && !cfg.italic && size === undefined) return undefined;
-    return { bold: cfg.bold, italics: cfg.italic, size };
+    const font = cfg.font || undefined;
+    if (!cfg.bold && !cfg.italic && size === undefined && !font) return undefined;
+    return { bold: cfg.bold, italics: cfg.italic, size, font };
   }
 
-  // 取标题的 run 级覆盖（加粗/斜体/字号），用于构造 TextRun 时盖过内置标题样式
-  private headingRunStyle(level: number): { bold?: boolean; italics?: boolean; size?: number } | undefined {
+  // 取标题的 run 级覆盖（加粗/斜体/字号/字体），用于构造 TextRun 时盖过内置标题样式
+  private headingRunStyle(level: number): StyleOverrides | undefined {
     return this.styleRunOverrides(this.settings?.headingStyles?.[('h' + level) as HeadingKey]);
   }
 
   // 正文文本的 run 级覆盖
-  private textRunStyle(): { bold?: boolean; italics?: boolean; size?: number } | undefined {
+  private textRunStyle(): StyleOverrides | undefined {
     return this.styleRunOverrides(this.settings?.textStyle);
   }
 
   // 代码（行内代码 + 代码块）的 run 级覆盖
-  private codeRunStyle(): { bold?: boolean; italics?: boolean; size?: number } | undefined {
+  private codeRunStyle(): StyleOverrides | undefined {
     return this.styleRunOverrides(this.settings?.codeStyle);
   }
 
@@ -2286,7 +2330,7 @@ export default class DocxExporterPlugin extends Plugin {
 
             const runs: TextRun[] = [];
             if (lang) {
-              runs.push(new TextRun({ text: lang, italics: true, color: "888880", size: (size || 22) - 2 }));
+              runs.push(new TextRun({ text: lang, italics: true, color: "888880", size: (size || 22) - 2, font: codeOverrides?.font ? fontOverride(codeOverrides.font) : codeFont }));
               runs.push(new TextRun({ break: 2 }));
             }
             runs.push(...this.parseSyntaxHighlightedCode(codeElement, codeFont, size, codeOverrides));
@@ -2501,7 +2545,7 @@ export default class DocxExporterPlugin extends Plugin {
     const langMatch = Array.from(codeElement.classList).find(cls => cls.startsWith('language-'));
     const lang = langMatch ? langMatch.substring('language-'.length) : null;
     if (lang) {
-      runs.push(new TextRun({ text: lang, italics: true, color: "888880", size: (size || 22) - 2 }));
+      runs.push(new TextRun({ text: lang, italics: true, color: "888880", size: (size || 22) - 2, font: codeOverrides?.font ? fontOverride(codeOverrides.font) : codeFont }));
       runs.push(new TextRun({ break: 2 }));
     }
     runs.push(...this.parseSyntaxHighlightedCode(codeElement, codeFont, size, codeOverrides));
