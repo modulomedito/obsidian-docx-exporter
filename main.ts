@@ -523,6 +523,11 @@ const DEFAULT_SETTINGS: DocxExporterSettings = {
 // 目录页码制表位：docx 库默认 A4 页面（宽 11906 twips、边距 1440），正文右边界 = 11906 - 1440*2
 const TOC_RIGHT_TAB_POSITION = 9026;
 
+// 字体：必须显式给出 eastAsia（中文字体）。只给 ascii/hAnsi 时 Word 会回退到默认中文字体，
+// 中文会挤在一起、标点被压缩，排版和 Obsidian 预览差别明显。
+const MAIN_FONT = { ascii: 'Times New Roman', hAnsi: 'Times New Roman', eastAsia: '宋体', hint: 'eastAsia' } as const;
+const CODE_FONT = { ascii: 'Courier New', hAnsi: 'Courier New', eastAsia: '宋体', hint: 'eastAsia' } as const;
+
 class DocxExporterSettingTab extends PluginSettingTab {
   plugin: DocxExporterPlugin;
   private i18n: I18N;
@@ -964,7 +969,7 @@ export default class DocxExporterPlugin extends Plugin {
           children,
           indent: { left: 360 * level },
           spacing: { after: 60 },
-          font: { name: 'Times New Roman' }
+          font: MAIN_FONT
         }));
       }
       if (nestedList) {
@@ -1012,7 +1017,7 @@ export default class DocxExporterPlugin extends Plugin {
     const baseLevel = options.minLevel > 0
       ? options.minLevel
       : Math.min(...entries.map(entry => entry.level));
-    const mainFont = { name: 'Times New Roman' };
+    const mainFont = MAIN_FONT;
     const paragraphs: Paragraph[] = [];
 
     if (options.title) {
@@ -1384,7 +1389,7 @@ export default class DocxExporterPlugin extends Plugin {
   // 解析代码高亮
   private parseSyntaxHighlightedCode(codeElement: HTMLElement, defaultFont: any, defaultSize: number): TextRun[] {
     const runs: TextRun[] = [];
-    const codeFont = { name: 'Courier New' };
+    const codeFont = CODE_FONT;
     Array.from(codeElement.childNodes).forEach(node => {
       if (node.nodeType === Node.TEXT_NODE && node.textContent) {
         node.textContent.split('\n').forEach((seg, idx, arr) => {
@@ -1556,19 +1561,21 @@ export default class DocxExporterPlugin extends Plugin {
         const paragraph = new Paragraph({
           children: inlineElements,
           alignment: this.getCellAlignment(cellStyle.textAlign),
-          spacing: { before: 100, after: 100 },
-          font: { name: 'Times New Roman' }
+          // 单元格内不加段前/段后间距，行高才紧凑（否则与单元格边距叠加后行会很高）
+          spacing: { before: 0, after: 0, line: 240 },
+          font: MAIN_FONT
         });
 
         // 为表头单元格添加特殊样式
         cells.push(new TableCell({
           children: [paragraph],
           width: { size: columnTwips, type: WidthType.DXA },
+          // 单元格级边距会覆盖表格级的 tblCellMar，这里必须给最小值才能贴边显示
           margins: {
-            top: 100,
-            bottom: 100,
-            left: 100,
-            right: 100
+            top: 40,
+            bottom: 40,
+            left: 20,
+            right: 20
           },
           ...(isHeader && {
             shading: {
@@ -1594,7 +1601,7 @@ export default class DocxExporterPlugin extends Plugin {
       rows,
       width: { size: this.pageContentTwips, type: WidthType.DXA },
       layout: TableLayoutType.FIXED,
-      margins: { top: 100, bottom: 100 },
+      margins: { top: 40, bottom: 40, left: 20, right: 20 },
       borders: {
         top: { style: BorderStyle.SINGLE, size: 1, color: "auto" },
         bottom: { style: BorderStyle.SINGLE, size: 1, color: "auto" },
@@ -1619,8 +1626,8 @@ export default class DocxExporterPlugin extends Plugin {
   // 解析行内元素（支持超链接、加粗、斜体、代码、图片等）
   private async parseInlineElements(element: HTMLElement, sourcePath: string, runStyle?: { bold?: boolean; italics?: boolean; size?: number }): Promise<InlineRun[]> {
     const runs: InlineRun[] = [];
-    const mainFont = { name: 'Times New Roman' };
-    const codeFont = { name: 'Courier New' };
+    const mainFont = MAIN_FONT;
+    const codeFont = CODE_FONT;
     // 标题样式覆盖（加粗/斜体/字号）：在 TextRun 构造时合并，才能盖过内置标题样式的默认值
     const styleRun = (opts: any) => new TextRun({
       ...opts,
@@ -1983,13 +1990,13 @@ export default class DocxExporterPlugin extends Plugin {
       case 'right': paragraphStyles.alignment = AlignmentType.RIGHT; break;
       case 'justify': paragraphStyles.alignment = AlignmentType.JUSTIFIED; break;
     }
-    const mainFont = { name: 'Times New Roman' };
-    const codeFont = { name: 'Courier New' };
+    const mainFont = MAIN_FONT;
+    const codeFont = CODE_FONT;
 
     // 如果没有子元素或只有空文本，则直接返回一个空段落
     if (!children.some(c => c.nodeType === Node.ELEMENT_NODE) && element.textContent?.trim()) {
       const inlineChildren = await this.parseInlineElements(element, sourcePath);
-      if (inlineChildren.length > 0) { return [new Paragraph({ children: inlineChildren, font: mainFont })]; }
+      if (inlineChildren.length > 0) { return [new Paragraph({ children: inlineChildren, font: mainFont, spacing: { line: 240 } })]; }
       return [];
     }
 
@@ -2072,7 +2079,8 @@ export default class DocxExporterPlugin extends Plugin {
             break;
           }
           if (el.textContent?.trim() || el.querySelector('img')) {
-            currentParagraphOptions.spacing = { after: 200 };
+            // 行距 240 = 单倍行距（w:lineRule 默认 auto）
+            currentParagraphOptions.spacing = { after: 200, line: 240 };
             const pChildren = await this.parseInlineElements(el, sourcePath);
             if (pChildren.length > 0) { docxObjects.push(new Paragraph({ ...currentParagraphOptions, children: pChildren })); }
           }
@@ -2144,8 +2152,8 @@ export default class DocxExporterPlugin extends Plugin {
   private async parseQuoteContent(blockquoteElement: HTMLElement, sourcePath: string, indentLevel: number = 0): Promise<Table | null> {
     const children: (Paragraph | Table)[] = [];
     const nodes = Array.from(blockquoteElement.childNodes);
-    const mainFont = { name: 'Times New Roman' };
-    const codeFont = { name: 'Courier New' };
+    const mainFont = MAIN_FONT;
+    const codeFont = CODE_FONT;
 
     for (const child of nodes) {
       if (child.nodeType === Node.ELEMENT_NODE) {
@@ -2275,7 +2283,7 @@ export default class DocxExporterPlugin extends Plugin {
     const paragraphs: Paragraph[] = [];
     const listItems = Array.from(listEl.children).filter(child => child.tagName === 'LI');
     const listType = listEl.tagName === 'OL' ? 'number' : 'bullet';
-    const mainFont = { name: 'Times New Roman' };
+    const mainFont = MAIN_FONT;
 
     // 为每个有序列表分配唯一 reference
     let currentNumberingRef = numberingRef;
@@ -2328,7 +2336,7 @@ export default class DocxExporterPlugin extends Plugin {
     const preStyle = window.getComputedStyle(preElement);
     const codeStyle = window.getComputedStyle(codeElement);
     const preBgColor = this.rgbToHex(preStyle.backgroundColor) || 'F0F0F0';
-    const codeFont = { name: 'Courier New' };
+    const codeFont = CODE_FONT;
     const size = this.pxToHalfPoints(codeStyle.fontSize);
 
     const runs: TextRun[] = [];
@@ -2655,6 +2663,15 @@ export default class DocxExporterPlugin extends Plugin {
       }));
 
       const doc = new Document({
+        // 文档级默认字体：显式带上 eastAsia 中文字体，避免中文回退到默认字体后被挤压变形
+        styles: {
+          default: {
+            document: {
+              run: { font: MAIN_FONT as any, size: 24 },
+              paragraph: { spacing: { line: 240 } }
+            }
+          }
+        },
         numbering: {
           config: numberingConfig.length > 0 ? numberingConfig : [{
             reference: "default-numbering",
