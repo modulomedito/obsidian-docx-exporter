@@ -524,7 +524,7 @@ interface HeadingStyleConfig {
 interface TocStyleConfig {
   bold?: boolean;
   italic?: boolean;
-  underline?: boolean;   // 目录条目默认带下划线，false 表示显式取消
+  underline?: boolean;   // 下划线，默认关闭（仅显式开启时生效）
   size?: string;         // 字号（pt），空字符串表示继承默认
   font?: string;         // 字体族，空字符串表示继承默认
   color?: string;        // 字体颜色（hex，如 0563C1 或 #0563C1），空表示默认蓝色
@@ -701,12 +701,12 @@ class DocxExporterSettingTab extends PluginSettingTab {
       await this.plugin.saveSettings();
     });
 
-    // 目录条目默认带下划线，因此这里默认高亮；点击一次即显式取消下划线
+    // 下划线默认关闭：未开启时目录条目不加下划线
     const underlineBtn = row.createEl('button', { text: 'U', cls: 'docx-style-toggle docx-style-underline' });
-    underlineBtn.classList.toggle('is-active', cfg.underline !== false);
+    underlineBtn.classList.toggle('is-active', !!cfg.underline);
     underlineBtn.addEventListener('click', async () => {
-      cfg.underline = cfg.underline === false;
-      underlineBtn.classList.toggle('is-active', cfg.underline !== false);
+      cfg.underline = cfg.underline ? undefined : true;
+      underlineBtn.classList.toggle('is-active', !!cfg.underline);
       await this.plugin.saveSettings();
     });
 
@@ -1008,7 +1008,7 @@ export default class DocxExporterPlugin extends Plugin {
       text,
       style: "Hyperlink",
       color: this.normalizeHexColor(cfg?.color),
-      underline: cfg?.underline === false ? undefined : {},
+      underline: cfg?.underline ? {} : undefined,
       bold: cfg?.bold,
       italics: cfg?.italic,
       size: !isNaN(size) && size > 0 ? Math.round(size * 2) : undefined,
